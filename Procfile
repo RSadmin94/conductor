@@ -1,3 +1,2 @@
-web: node src/index.js
-worker: node src/worker-all.js
-
+﻿web: npm run start:web
+worker: npm run start:worker
