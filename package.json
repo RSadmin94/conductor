@@ -1,23 +1,25 @@
-{
-  "name": "conductor-mvp",
-  "version": "1.0.0",
-  "description": "Conductor MVP - IDEA → feasibility → Approved → UI artifacts",
-  "main": "src/index.js",
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "worker": "node src/worker-all.js",
-    "smoke-test": "node smoke-test.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "pg": "^8.11.3",
-    "ioredis": "^5.3.2",
-    "bullmq": "^5.4.0",
-    "dotenv": "^16.3.1",
-    "cors": "^2.8.5"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.5"
-  }
+﻿{
+    "name":  "conductor-mvp",
+    "version":  "1.0.0",
+    "description":  "Conductor MVP - IDEA â†’ feasibility â†’ Approved â†’ UI artifacts",
+    "main":  "src/index.js",
+    "scripts":  {
+                    "start":  "node src/index.js",
+                    "dev":  "node --watch src/index.js",
+                    "worker":  "node src/worker-all.js",
+                    "smoke-test":  "node smoke-test.js",
+                    "start:web":  "npm run start",
+                    "start:worker":  "npm run worker"
+                },
+    "dependencies":  {
+                         "express":  "^4.18.2",
+                         "pg":  "^8.11.3",
+                         "ioredis":  "^5.3.2",
+                         "bullmq":  "^5.4.0",
+                         "dotenv":  "^16.3.1",
+                         "cors":  "^2.8.5"
+                     },
+    "devDependencies":  {
+                            "@types/node":  "^20.11.5"
+                        }
 }
