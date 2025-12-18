@@ -1,4 +1,4 @@
-const IORedis = require('ioredis');
+﻿const IORedis = require('ioredis');
 require('dotenv').config();
 
 // Shared Redis connection for BullMQ
@@ -17,6 +17,12 @@ function getRedisConnection() {
         port: parseInt(urlObj.port || '6379'),
         password: urlObj.password || undefined,
         maxRetriesPerRequest: null,
+        retryStrategy: (times) => {
+          const delay = Math.min(times * 50, 2000);
+          return delay;
+        },
+        enableReadyCheck: false,
+        enableOfflineQueue: false,
       });
     } else if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
       // Fallback for Railway-style env vars
@@ -25,6 +31,12 @@ function getRedisConnection() {
         port: parseInt(process.env.REDIS_PORT),
         password: process.env.REDIS_PASSWORD || undefined,
         maxRetriesPerRequest: null,
+        retryStrategy: (times) => {
+          const delay = Math.min(times * 50, 2000);
+          return delay;
+        },
+        enableReadyCheck: false,
+        enableOfflineQueue: false,
       });
     } else {
       // Local development fallback
@@ -39,4 +51,3 @@ function getRedisConnection() {
 }
 
 module.exports = { getRedisConnection };
-

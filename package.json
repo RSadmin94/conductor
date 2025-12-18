@@ -1,7 +1,7 @@
 {
     "name":  "conductor-mvp",
     "version":  "1.0.0",
-    "description":  "Conductor MVP - IDEA â†’ feasibility â†’ Approved â†’ UI artifacts",
+    "description":  "Conductor MVP - IDEA Ã¢â€ â€™ feasibility Ã¢â€ â€™ Approved Ã¢â€ â€™ UI artifacts",
     "main":  "src/index.js",
     "scripts":  {
                     "start":  "node src/index.js",
