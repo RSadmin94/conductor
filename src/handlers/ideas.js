@@ -1,4 +1,4 @@
-const pool = require('../db');
+const db = require('../db');
 const { randomUUID } = require('crypto');
 
 async function createIdea(req, res) {
@@ -7,6 +7,37 @@ async function createIdea(req, res) {
     
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
       return res.status(400).json({ error: 'content is required' });
+    }
+    
+    // If using in-memory storage, handle directly
+    if (db.useInMemory()) {
+      const projectId = randomUUID();
+      const ideaId = randomUUID();
+      
+      // Create project with state='Active' and stage='Idea'
+      const projectResult = await db.query(
+        'INSERT INTO projects (id, state, stage) VALUES ($1, $2, $3) RETURNING id, state, stage',
+        [projectId, 'Active', 'Idea']
+      );
+      
+      // Create idea record
+      const ideaResult = await db.query(
+        'INSERT INTO ideas (id, project_id, content) VALUES ($1, $2, $3) RETURNING id',
+        [ideaId, projectId, content.trim()]
+      );
+      
+      return res.json({
+        projectId,
+        ideaId,
+        state: 'Active',
+        stage: 'Idea'
+      });
+    }
+    
+    // Use database connection if available
+    const pool = db.pool;
+    if (!pool) {
+      return res.status(500).json({ error: 'Database not available' });
     }
     
     const client = await pool.connect();
@@ -48,4 +79,3 @@ async function createIdea(req, res) {
 }
 
 module.exports = { createIdea };
-
