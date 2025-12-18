@@ -1,0 +1,602 @@
+
+Qwen3-Max
+1:39 PM
+Manus-Like Conductor MVP — Technical Architecture Draft (v0.2 — Intent-Aligned)
+4.1 DATA MODEL — PostgreSQL
+projects
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+user_id
+UUID
+N
+N
+—
+(user_id)
+current_state
+TEXT
+N
+N
+—
+(current_state)
+created_at
+TIMESTAMP
+N
+N
+—
+—
+updated_at
+TIMESTAMP
+N
+N
+—
+—
+ideas
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+content
+TEXT
+N
+N
+—
+—
+created_at
+TIMESTAMP
+N
+N
+—
+—
+specs
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+content
+JSONB
+N
+N
+—
+—
+created_at
+TIMESTAMP
+N
+N
+—
+—
+decisions
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+outcome
+TEXT
+N
+N
+—
+(project_id, outcome)
+rationale
+TEXT
+Y
+N
+—
+—
+decided_at
+TIMESTAMP
+N
+N
+—
+—
+tasks
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+run_id
+UUID
+N
+N
+runs.id
+(run_id)
+description
+TEXT
+N
+N
+—
+—
+status
+TEXT
+N
+N
+—
+(status), (project_id, status)
+created_at
+TIMESTAMP
+N
+N
+—
+—
+completed_at
+TIMESTAMP
+Y
+N
+—
+—
+runs
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+state
+TEXT
+N
+N
+—
+(project_id, state)
+started_at
+TIMESTAMP
+Y
+N
+—
+—
+ended_at
+TIMESTAMP
+Y
+N
+—
+—
+failure_reason
+TEXT
+Y
+N
+—
+—
+artifacts
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+run_id
+UUID
+Y
+N
+runs.id
+(run_id)
+name
+TEXT
+N
+N
+—
+—
+uri
+TEXT
+N
+N
+—
+—
+created_at
+TIMESTAMP
+N
+N
+—
+—
+messages
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+role
+TEXT
+N
+N
+—
+—
+content
+TEXT
+N
+N
+—
+—
+created_at
+TIMESTAMP
+N
+N
+—
+—
+audit_logs
+Field
+Type
+Nullable
+PK
+FK
+Index
+id
+UUID
+N
+Y
+—
+—
+project_id
+UUID
+N
+N
+projects.id
+(project_id)
+action
+TEXT
+N
+N
+—
+(action), (project_id)
+actor_id
+UUID
+N
+N
+—
+—
+metadata
+JSONB
+Y
+N
+—
+—
+timestamp
+TIMESTAMP
+N
+N
+—
+—
+4.2 SYSTEM STATE MACHINE
+Idea
+Entry: ideas record created
+Exit: Feasibility job enqueued
+Required data: ideas.content
+Allowed: → Feasibility
+Forbidden: All others
+Hard stop: None
+Feasibility
+Entry: feasibility.process job enqueued
+Exit: decisions recorded
+Required data: decisions.outcome
+Allowed: → Approved, → Rejected
+Forbidden: → Planning, → Execution
+Hard stop: Job retry exhaustion → state = 'Error'
+Approved
+Entry: decisions.outcome = 'Approved'
+Exit: Planning job completed
+Required data: specs record
+Allowed: → Planning
+Forbidden: → Execution, → Review
+Hard stop: None
+Planning
+Entry: planning.generate job enqueued
+Exit: Execution handoff artifact written
+Required data: tasks, artifacts with name = 'execution_plan'
+Allowed: → Execution
+Forbidden: → Review, → Release
+Hard stop: Job failure after retries → state = 'Error'
+Execution
+Entry: runs created, artifacts.execution_plan written
+Exit: Executor reports all tasks complete
+Required data: tasks.status = 'pending', artifacts.execution_plan
+Allowed: → Review (success), → Execution (retryable report), → Error (cancel/fail)
+Forbidden: → Planning, → Approved
+Hard stop: Manual cancel, timeout, or unrecoverable executor report
+Review
+Entry: All tasks.status = 'completed'
+Exit: Review job success
+Required data: Artifacts from executor
+Allowed: → Release
+Forbidden: → Execution, → Planning
+Hard stop: Review job failure after retries
+Release
+Entry: Review job success
+Exit: Terminal
+Required data: Final artifacts
+Allowed: None
+Forbidden: All backward transitions
+Hard stop: None
+Rejected
+Entry: decisions.outcome = 'Rejected'
+Exit: Terminal
+Required data: decisions.rationale
+Allowed: None
+Forbidden: Any forward transition
+Hard stop: None
+4.3 API SURFACE — CONDUCTOR SERVICE
+Protocol: tRPC
+
+idea.intake
+Purpose: Accept initial idea
+Input: { projectId: UUID, content: string }
+Output: { ideaId: UUID }
+Errors: 400 (missing content), 409 (project not in 'Idea')
+feasibility.trigger
+Purpose: Start feasibility analysis
+Input: { projectId: UUID }
+Output: { jobId: string }
+Errors: 409 (project not in 'Idea')
+decision.record
+Purpose: Record decision outcome
+Input: { projectId: UUID, outcome: 'Approved' | 'Rejected', rationale?: string }
+Output: { decisionId: UUID }
+Errors: 400 (invalid outcome), 409 (project not in 'Feasibility')
+planning.trigger
+Purpose: Start planning phase
+Input: { projectId: UUID }
+Output: { jobId: string }
+Errors: 409 (project not in 'Approved')
+execution.start
+Purpose: Generate execution handoff artifact
+Input: { projectId: UUID }
+Output: { runId: UUID, executionArtifactUri: string }
+Errors: 409 (project not in 'Planning')
+run.control
+Purpose: Pause or cancel a run
+Input: { runId: UUID, action: 'pause' | 'cancel' }
+Output: { success: true, state: string }
+Errors: 400 (invalid action), 409 (run not active)
+execution.report
+Purpose: Receive task outcome from external executor
+Input: { runId: UUID, taskId: UUID, status: 'completed' | 'failed', artifacts?: [{name: string, uri: string}], failureReason?: string }
+Output: { acknowledged: true }
+Errors: 400 (invalid status), 404 (run/task not found)
+artifact.register
+Purpose: Register artifact (used by executors or user)
+Input: { projectId: UUID, runId?: UUID, name: string, uri: string }
+Output: { artifactId: UUID }
+Errors: 400 (missing fields)
+run.resume
+Purpose: Resume interrupted run
+Input: { runId: UUID }
+Output: { resumed: true, executionArtifactUri?: string }
+Errors: 409 (run not resumable), 404 (run not found)
+4.4 WORKER JOBS — REDIS QUEUE
+feasibility.process
+Trigger: feasibility.trigger
+Payload: { projectId: UUID }
+Output: decisions record
+Idempotency: projectId
+Retry: 3
+Backoff: Exponential (1s, 2s, 4s)
+Hard halt: After retries → state = 'Error'
+planning.generate
+Trigger: planning.trigger
+Payload: { projectId: UUID }
+Output: specs, tasks
+Idempotency: projectId
+Retry: 2
+Backoff: Fixed (5s)
+Hard halt: After retries → state = 'Error'
+execution.prepare_handoff
+Trigger: execution.start
+Payload: { runId: UUID, projectId: UUID }
+Output: runs, artifacts (name = 'execution_plan'), tasks.status = 'pending'
+Idempotency: runId
+Retry: 1
+Backoff: None
+Hard halt: On failure → state = 'Error'
+review.gate
+Trigger: All tasks.status = 'completed'
+Payload: { runId: UUID }
+Output: Transition to 'Release' or failure
+Idempotency: runId
+Retry: 2
+Backoff: Linear (10s)
+Hard halt: After retries → state = 'ReviewFailed'
+failure.timeout_monitor
+Trigger: After execution.prepare_handoff
+Payload: { runId: UUID, timeoutSeconds: 3600 }
+Output: If no execution.report → runs.state = 'TimedOut'
+Idempotency: runId
+Retry: None
+Hard halt: Always halts on timeout
+4.5 EVENT FLOW — TEXT SEQUENCE DIAGRAMS
+Flow 1: Idea → Feasibility → Decision
+User → Frontend: submits idea
+→ writes ideas
+→ emits idea.submitted
+Frontend → Conductor: feasibility.trigger
+→ validates state = 'Idea'
+Conductor → Queue: enqueues feasibility.process
+→ writes audit_logs
+Worker → DB: reads ideas
+→ writes decisions
+→ updates projects.current_state
+Conductor → Frontend: state change event
+Flow 2: Approved → Planning → Execution Handoff
+Frontend → Conductor: planning.trigger
+→ validates state = 'Approved'
+Conductor → Queue: planning.generate
+Worker → DB: writes specs, tasks
+→ updates state = 'Planning'
+Frontend → Conductor: execution.start
+Conductor → Queue: execution.prepare_handoff
+Worker → DB:
+→ creates runs
+→ writes artifacts (name = 'execution_plan')
+→ sets tasks.status = 'pending'
+→ sets projects.current_state = 'Execution'
+Conductor → Frontend: returns executionArtifactUri
+Executor (Manus/Cursor): fetches artifact, begins work
+Flow 3: Execution Failure → Retry → Halt
+Executor → Conductor: execution.report with status = 'failed'
+Conductor → DB: updates tasks.status, records failure artifacts
+Conductor → Queue: may re-enqueue execution.prepare_handoff (if retryable per policy)
+On irrecoverable failure or max retries:
+→ sets projects.current_state = 'Error'
+→ emits execution.halted
+Flow 4: Resume Interrupted Run
+Frontend → Conductor: run.resume(runId)
+Conductor → DB: validates runs.state IN ('Paused', 'Error') and resumable
+Conductor → Queue: re-enqueues execution.prepare_handoff
+Worker → DB: re-emits execution_plan artifact (idempotent)
+Executor re-fetches and resumes
+Flow 5: Manual Override (Pause or Cancel)
+Frontend → Conductor: run.control(action='pause')
+Conductor → DB: sets runs.state = 'Paused'
+Conductor → Executor: sends signal (out-of-band, best-effort)
+On cancel:
+→ sets runs.state = 'Cancelled'
+→ writes audit_logs
+→ no further job enqueues
+4.6 MINIMAL SECURITY & GOVERNANCE MODEL
+Authentication: Internal SSO token (JWT) on all requests
+Authorization: User must match projects.user_id; executors use service identity
+Secrets: AI keys in encrypted environment variables; never in DB or logs
+Audit logging fields: actor_id, action, project_id, timestamp, metadata
+Immutable records:
+ideas.content
+decisions.outcome
+decisions.decided_at
+audit_logs (append-only)
+4.7 MODEL INTEGRATION & ROUTING POLICY
+Adapters
+GPT
+Purpose: Feasibility analysis, Planning generation
+Input: { prompt: string, max_tokens: number, temperature: number }
+Output: { content: string, usage: object }
+Constraints: Must not decide outcomes; only propose options
+Claude
+Purpose: Decision rationale, Review evaluation
+Input: { system: string, messages: [{role, content}], max_tokens: number }
+Output: { content: string, stop_reason: string }
+Constraints: Must reference explicit criteria; no autonomous judgment
+Qwen
+Purpose: Structured task decomposition, state validation
+Input: { instruction: string, context: object }
+Output: { steps: [...], assumptions: string }
+Constraints: Output must be parseable JSON; no prose
+Gemini
+Purpose: Artifact schema validation, format compliance
+Input: { task: string, expected_format: string }
+Output: { valid: boolean, errors?: [...], output?: object }
+Constraints: Must not generate new content
+DeepSeek
+Purpose: Code-heavy planning (fallback)
+Input: { problem: string, lang: string }
+Output: { code: string, explanation: string }
+Constraints: Must not execute or test code
+Model Routing Policy
+Routing authority: Conductor Service (hard-coded per job type)
+Intent mapping:
+Feasibility → GPT
+Planning → GPT (default), DeepSeek (if intent contains code keywords)
+Decision rationale → Claude
+Task decomposition → Qwen
+Review → Claude
+Artifact validation → Gemini
+Failure behavior:
+Primary model fails → halt job (no fallback), except DeepSeek → GPT allowed once
+Retry strategy:
+GPT/Claude/Qwen: 2 retries
+Gemini/DeepSeek: 1 retry
+All retries count toward job-level retry limit

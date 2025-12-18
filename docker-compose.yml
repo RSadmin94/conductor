@@ -1,0 +1,21 @@
+services:
+  conductor-postgres:
+    image: postgres:16
+    container_name: conductor-postgres
+    environment:
+      POSTGRES_USER: conductor
+      POSTGRES_PASSWORD: conductor_pw
+      POSTGRES_DB: conductor_db
+    ports:
+      - "55432:5432"
+    volumes:
+      - conductor_pg:/var/lib/postgresql/data
+
+  conductor-redis:
+    image: redis:7
+    container_name: conductor-redis
+    ports:
+      - "56379:6379"
+
+volumes:
+  conductor_pg:
