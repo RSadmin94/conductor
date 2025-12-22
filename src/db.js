@@ -90,6 +90,30 @@ async function query(sql, params = []) {
     return result([], 1);
   }
 
+  // SELECT id, state FROM projects WHERE id = $1
+  if (/^SELECT\s+ID,\s*STATE\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
+    const [id] = params;
+    const project = memory.projects.get(id);
+    if (!project) return result([]);
+    return result([{ id: project.id, state: project.state }]);
+  }
+
+  // SELECT id, state, stage FROM projects WHERE id = $1
+  if (/^SELECT\s+ID,\s*STATE,\s*STAGE\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
+    const [id] = params;
+    const project = memory.projects.get(id);
+    if (!project) return result([]);
+    return result([{ id: project.id, state: project.state, stage: project.stage }]);
+  }
+
+  // SELECT * FROM projects WHERE id = $1
+  if (/^SELECT\s+\*\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
+    const [id] = params;
+    const project = memory.projects.get(id);
+    if (!project) return result([]);
+    return result([project]);
+  }
+
   // SELECT helpers (optional but useful)
   if (/^SELECT\s+\*\s+FROM\s+PROJECTS\b/.test(s)) {
     return result([...memory.projects.values()]);
