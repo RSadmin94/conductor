@@ -1,15 +1,15 @@
-const pool = require('../db');
+const { query } = require('../db');
 const { randomUUID } = require('crypto');
 
 async function processPlanningJob(job) {
   const { projectId } = job.data;
-  const client = await pool.connect();
   
   try {
-    await client.query('BEGIN');
+    // Begin transaction (no-op for in-memory)
+    await query('BEGIN');
     
     // Get project to verify it exists and is in correct stage
-    const projectResult = await client.query(
+    const projectResult = await query(
       'SELECT stage FROM projects WHERE id = $1',
       [projectId]
     );
@@ -24,7 +24,7 @@ async function processPlanningJob(job) {
     
     // Create decision record (idempotent via UNIQUE constraint)
     // stage='planning' for idempotency
-    await client.query(
+    await query(
       'INSERT INTO decisions (id, project_id, stage, outcome, rationale) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (project_id, stage) DO NOTHING',
       [randomUUID(), projectId, 'planning', outcome, rationale]
     );
@@ -37,28 +37,30 @@ async function processPlanningJob(job) {
       timestamp: new Date().toISOString()
     });
     
-    await client.query(
+    await query(
       'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
       [randomUUID(), projectId, 'planning', 'planning_plan', 'planning_plan', artifactContent]
     );
     
     // Update project stage
     // T11: Set stage='PlanningComplete', keep state='Active'
-    await client.query(
+    console.log(`[PlanningJob] Updating project ${projectId}: stage → PlanningComplete`);
+    await query(
       'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
       ['PlanningComplete', projectId]
     );
     
-    await client.query('COMMIT');
+    // Commit transaction (no-op for in-memory)
+    await query('COMMIT');
     
+    console.log(`[PlanningJob] Completed for project ${projectId}`);
     return { projectId, outcome, rationale };
   } catch (error) {
-    await client.query('ROLLBACK');
+    // Rollback transaction (no-op for in-memory)
+    await query('ROLLBACK');
+    console.error(`[PlanningJob] Error for project ${projectId}:`, error.message);
     throw error;
-  } finally {
-    client.release();
   }
 }
 
 module.exports = { processPlanningJob };
-

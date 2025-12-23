@@ -1,15 +1,15 @@
-const pool = require('../db');
+const { query } = require('../db');
 const { randomUUID } = require('crypto');
 
 async function processFeasibilityJob(job) {
   const { projectId } = job.data;
-  const client = await pool.connect();
   
   try {
-    await client.query('BEGIN');
+    // Begin transaction (no-op for in-memory)
+    await query('BEGIN');
     
     // Get idea content
-    const ideaResult = await client.query(
+    const ideaResult = await query(
       'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
       [projectId]
     );
@@ -26,14 +26,15 @@ async function processFeasibilityJob(job) {
     
     // Create decision record (idempotent via UNIQUE constraint)
     // stage='feasibility' for idempotency
-    await client.query(
+    await query(
       'INSERT INTO decisions (id, project_id, stage, outcome, rationale) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (project_id, stage) DO NOTHING',
       [randomUUID(), projectId, 'feasibility', outcome, rationale]
     );
     
     // Update project stage and state
     // T10: Set stage='FeasibilityComplete', keep state='Active'
-    await client.query(
+    console.log(`[FeasibilityJob] Updating project ${projectId}: stage=Idea → FeasibilityComplete`);
+    await query(
       'UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3',
       ['FeasibilityComplete', 'Active', projectId]
     );
@@ -47,21 +48,22 @@ async function processFeasibilityJob(job) {
       timestamp: new Date().toISOString()
     });
     
-    await client.query(
+    await query(
       'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
       [randomUUID(), projectId, 'feasibility', 'feasibility_report', 'feasibility_report', artifactContent]
     );
     
-    await client.query('COMMIT');
+    // Commit transaction (no-op for in-memory)
+    await query('COMMIT');
     
+    console.log(`[FeasibilityJob] Completed for project ${projectId}`);
     return { projectId, outcome, rationale };
   } catch (error) {
-    await client.query('ROLLBACK');
+    // Rollback transaction (no-op for in-memory)
+    await query('ROLLBACK');
+    console.error(`[FeasibilityJob] Error for project ${projectId}:`, error.message);
     throw error;
-  } finally {
-    client.release();
   }
 }
 
 module.exports = { processFeasibilityJob };
-

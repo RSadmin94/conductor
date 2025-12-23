@@ -1,15 +1,15 @@
-const pool = require('../db');
+const { query } = require('../db');
 const { randomUUID } = require('crypto');
 
 async function processExecutionJob(job) {
   const { projectId } = job.data;
-  const client = await pool.connect();
   
   try {
-    await client.query('BEGIN');
+    // Begin transaction (no-op for in-memory)
+    await query('BEGIN');
     
     // Check if already ExecutionComplete (idempotency)
-    const projectResult = await client.query(
+    const projectResult = await query(
       'SELECT stage FROM projects WHERE id = $1',
       [projectId]
     );
@@ -22,33 +22,35 @@ async function processExecutionJob(job) {
     
     // If already ExecutionComplete, exit safely (idempotency)
     if (currentStage === 'ExecutionComplete') {
-      await client.query('COMMIT');
+      await query('COMMIT');
+      console.log(`[ExecutionJob] Project ${projectId} already ExecutionComplete (idempotent)`);
       return { projectId, message: 'Already ExecutionComplete', skipped: true };
     }
     
     // Update stage to ExecutionInProgress
-    await client.query(
+    console.log(`[ExecutionJob] Updating project ${projectId}: stage → ExecutionInProgress`);
+    await query(
       'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
       ['ExecutionInProgress', projectId]
     );
     
     // Step 1: Validate
     const validateRunId = randomUUID();
-    await client.query(
+    await query(
       'INSERT INTO runs (id, project_id, state, started_at) VALUES ($1, $2, $3, NOW())',
       [validateRunId, projectId, 'success']
     );
     
     // Step 2: Process
     const processRunId = randomUUID();
-    await client.query(
+    await query(
       'INSERT INTO runs (id, project_id, state, started_at) VALUES ($1, $2, $3, NOW())',
       [processRunId, projectId, 'success']
     );
     
     // Step 3: Finalize
     const finalizeRunId = randomUUID();
-    await client.query(
+    await query(
       'INSERT INTO runs (id, project_id, state, started_at, ended_at) VALUES ($1, $2, $3, NOW(), NOW())',
       [finalizeRunId, projectId, 'success']
     );
@@ -74,7 +76,7 @@ async function processExecutionJob(job) {
 Execution completed successfully.
 `;
     
-    await client.query(
+    await query(
       'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
       [randomUUID(), projectId, 'execution', 'execution_log', 'execution_log', executionLog]
     );
@@ -90,19 +92,22 @@ Execution completed successfully.
       completedAt: new Date().toISOString()
     });
     
-    await client.query(
+    await query(
       'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
       [randomUUID(), projectId, 'execution', 'execution_result', 'execution_result', executionResult]
     );
     
     // Update stage to ExecutionComplete
-    await client.query(
+    console.log(`[ExecutionJob] Updating project ${projectId}: stage → ExecutionComplete`);
+    await query(
       'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
       ['ExecutionComplete', projectId]
     );
     
-    await client.query('COMMIT');
+    // Commit transaction (no-op for in-memory)
+    await query('COMMIT');
     
+    console.log(`[ExecutionJob] Completed for project ${projectId}`);
     return { 
       projectId, 
       runsCreated: 3,
@@ -110,12 +115,11 @@ Execution completed successfully.
       finalStage: 'ExecutionComplete'
     };
   } catch (error) {
-    await client.query('ROLLBACK');
+    // Rollback transaction (no-op for in-memory)
+    await query('ROLLBACK');
+    console.error(`[ExecutionJob] Error for project ${projectId}:`, error.message);
     throw error;
-  } finally {
-    client.release();
   }
 }
 
 module.exports = { processExecutionJob };
-
