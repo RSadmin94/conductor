@@ -7,6 +7,8 @@ let pool = null;
 const memory = {
   projects: new Map(), // id -> { id, state, stage, created_at, updated_at }
   ideas: new Map(),    // id -> { id, project_id, content, created_at }
+  artifacts: new Map(), // id -> { id, project_id, type, name, content, uri, created_at }
+  decisions: new Map(), // id -> { id, project_id, outcome, rationale, created_at }
 };
 
 // Initialize database connection if DATABASE_URL is provided
