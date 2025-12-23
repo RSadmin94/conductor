@@ -1,11 +1,11 @@
-const pool = require('../db');
+const { query } = require('../db');
 
 async function getReport(req, res) {
   try {
     const { projectId } = req.params;
     
     // Get project
-    const projectResult = await pool.query(
+    const projectResult = await query(
       'SELECT id, state, stage, created_at, updated_at FROM projects WHERE id = $1',
       [projectId]
     );
@@ -17,14 +17,14 @@ async function getReport(req, res) {
     const project = projectResult.rows[0];
     
     // Get idea (latest)
-    const ideaResult = await pool.query(
+    const ideaResult = await query(
       'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
       [projectId]
     );
     const idea = ideaResult.rows.length > 0 ? ideaResult.rows[0].content : 'No idea found';
     
     // Get feasibility decision
-    const feasibilityDecisionResult = await pool.query(
+    const feasibilityDecisionResult = await query(
       'SELECT outcome FROM decisions WHERE project_id = $1 AND stage = $2 ORDER BY created_at DESC LIMIT 1',
       [projectId, 'feasibility']
     );
@@ -33,7 +33,7 @@ async function getReport(req, res) {
       : 'Pending';
     
     // Get feasibility_report artifact
-    const feasibilityArtifactResult = await pool.query(
+    const feasibilityArtifactResult = await query(
       'SELECT content FROM artifacts WHERE project_id = $1 AND stage = $2 AND type = $3 ORDER BY created_at DESC LIMIT 1',
       [projectId, 'feasibility', 'feasibility_report']
     );
@@ -56,7 +56,7 @@ async function getReport(req, res) {
     }
     
     // Get planning_plan artifact
-    const planningArtifactResult = await pool.query(
+    const planningArtifactResult = await query(
       'SELECT content FROM artifacts WHERE project_id = $1 AND stage = $2 AND type = $3 ORDER BY created_at DESC LIMIT 1',
       [projectId, 'planning', 'planning_plan']
     );

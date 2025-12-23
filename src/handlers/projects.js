@@ -1,11 +1,11 @@
-const pool = require('../db');
+const { query } = require('../db');
 
 async function getProject(req, res) {
   try {
     const { projectId } = req.params;
     
     // Get project
-    const projectResult = await pool.query(
+    const projectResult = await query(
       'SELECT id, state, stage, created_at, updated_at FROM projects WHERE id = $1',
       [projectId]
     );
@@ -17,7 +17,7 @@ async function getProject(req, res) {
     const project = projectResult.rows[0];
     
     // Get latest decision
-    const decisionResult = await pool.query(
+    const decisionResult = await query(
       'SELECT outcome, rationale, created_at FROM decisions WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
       [projectId]
     );
