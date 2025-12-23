@@ -1,363 +1,172 @@
 const { query } = require('../db');
 const { randomUUID } = require('crypto');
 const { PLAN_TYPE, validatePlan, generatePlanFallback } = require('../intelligence/contracts');
+const { logPlanningRun } = require('../utils/runLogger');
+const Anthropic = require('@anthropic-ai/sdk');
+
+const client = new Anthropic();
 
 /**
- * Generate execution_plan_v1 artifact
- * 
- * In production, this would call an AI model
- * For MVP, we generate a realistic plan based on idea and feasibility data
+ * System prompt for Claude 3.5 Sonnet - Execution Planning
+ * Ensures strict JSON output with realistic, concrete plans
  */
-function generateExecutionPlan(projectId, ideaContent, feasibilityData) {
-  const ideaLower = ideaContent.toLowerCase();
-  
-  // Determine timeline based on feasibility estimates
-  let timelineWeeks = 8;
-  let teamSize = '2-3';
-  
-  if (feasibilityData && feasibilityData.estimates) {
-    timelineWeeks = feasibilityData.estimates.mvp_weeks || 8;
-    teamSize = feasibilityData.estimates.team_size || '2-3';
-  }
-  
-  const plan = {
-    schema_version: 'v1',
-    project_id: projectId,
-    timeline_weeks: timelineWeeks,
-    phases: generatePhases(ideaContent, timelineWeeks),
-    components: generateComponents(ideaContent),
-    roles: generateRoles(teamSize),
-    milestones: generateMilestones(timelineWeeks),
-    open_questions: generateOpenQuestions(feasibilityData),
-    immediate_next_actions: generateImmediateActions(ideaContent)
-  };
-  
-  return plan;
-}
+const PLANNING_SYSTEM_PROMPT = `You are Conductor, a senior delivery lead + architect. Your job is to create a concrete execution plan for a project based on the idea and the feasibility analysis artifact, and output a STRICT JSON object that conforms exactly to the execution_plan_v1 schema.
 
-function generatePhases(idea, timelineWeeks) {
-  const discoveryWeeks = Math.ceil(timelineWeeks * 0.2);
-  const buildWeeks = Math.ceil(timelineWeeks * 0.5);
-  const testWeeks = Math.ceil(timelineWeeks * 0.2);
-  const launchWeeks = Math.max(1, timelineWeeks - discoveryWeeks - buildWeeks - testWeeks);
-  
-  return [
+OUTPUT RULES (NON-NEGOTIABLE):
+- Output MUST be valid JSON only. No markdown, no commentary, no code fences.
+- Do NOT include placeholder text (e.g., "TBD", "standard tasks", "various", "N/A").
+- The plan MUST be consistent with the feasibility analysis verdict, risks, and assumptions.
+- If feasibility verdict is "no_go": still produce a plan, but it should focus on a "revise/validate first" plan with short timeline, heavy discovery, and clear stop conditions.
+- Ensure minimum counts:
+  - phases: at least 4 phases (Discovery, Build, Test, Launch — naming can vary but must map to these)
+  - milestones: at least 5 items
+  - immediate_next_actions: at least 7 items
+  - components: at least 6 items (unless the project is truly tiny; still try for 6)
+- timeline_weeks should approximately equal the sum of phases.duration_weeks (be honest).
+- complexity MUST be one of: "low", "medium", "high".
+
+PHASE STRUCTURE:
+- Discovery & Requirements (20% of timeline)
+- Core Build (50% of timeline)
+- Testing & Refinement (20% of timeline)
+- Launch & Deployment (10% of timeline)
+
+COMPONENT QUALITY BAR:
+- Map to real software parts (auth, data model, API, UI, background jobs, observability, security)
+- Include dependencies between components
+- Assign realistic complexity levels
+- Include build notes for implementation guidance
+
+MILESTONE QUALITY BAR:
+- Milestones must be testable outcomes, not vague intentions
+- Include explicit risk-mitigating tasks drawn from feasibility risks
+- Acceptance criteria must be measurable
+
+IMMEDIATE NEXT ACTIONS QUALITY BAR:
+- Must be actionable within 24–72 hours
+- Should include: setup, planning, communication, and resource allocation
+- Should be specific (not "start building" but "set up CI/CD pipeline")
+
+If feasibility is missing or obviously low-confidence, increase open_questions and make Phase 1 discovery heavier.
+
+Return ONLY valid JSON matching this exact structure:
+{
+  "schema_version": "v1",
+  "project_id": "...",
+  "timeline_weeks": 0,
+  "phases": [
     {
-      name: 'Discovery & Requirements',
-      duration_weeks: discoveryWeeks,
-      objectives: [
-        'Gather detailed requirements from stakeholders',
-        'Define user personas and use cases',
-        'Create technical architecture',
-        'Identify dependencies and integrations'
-      ],
-      deliverables: [
-        'Requirements document',
-        'Architecture diagram',
-        'Technology stack decision',
-        'Project timeline and milestones'
-      ],
-      success_criteria: [
-        'Stakeholder sign-off on requirements',
-        'Architecture approved by technical lead',
-        'Team trained on selected technologies'
-      ]
-    },
-    {
-      name: 'Core System Build',
-      duration_weeks: buildWeeks,
-      objectives: [
-        'Implement core features and functionality',
-        'Set up CI/CD pipeline',
-        'Build data models and APIs',
-        'Integrate external services'
-      ],
-      deliverables: [
-        'Working prototype',
-        'API documentation',
-        'Database schema',
-        'Automated test suite'
-      ],
-      success_criteria: [
-        'Core features functional',
-        'Tests passing (>80% coverage)',
-        'API endpoints documented',
-        'Performance benchmarks met'
-      ]
-    },
-    {
-      name: 'Testing & Refinement',
-      duration_weeks: testWeeks,
-      objectives: [
-        'Conduct QA and user testing',
-        'Fix bugs and optimize performance',
-        'Security audit and hardening',
-        'Documentation and training'
-      ],
-      deliverables: [
-        'Test report and bug fixes',
-        'Security audit report',
-        'User documentation',
-        'Training materials'
-      ],
-      success_criteria: [
-        'Critical bugs resolved',
-        'Security vulnerabilities addressed',
-        'Performance optimized',
-        'User acceptance testing passed'
-      ]
-    },
-    {
-      name: 'Launch & Deployment',
-      duration_weeks: launchWeeks,
-      objectives: [
-        'Deploy to production',
-        'Monitor system health',
-        'Provide user support',
-        'Plan post-launch improvements'
-      ],
-      deliverables: [
-        'Production deployment',
-        'Monitoring and alerting setup',
-        'Support documentation',
-        'Post-launch roadmap'
-      ],
-      success_criteria: [
-        'System live and stable',
-        'Monitoring in place',
-        'Support team trained',
-        'User feedback collected'
-      ]
+      "name": "...",
+      "duration_weeks": 0,
+      "objectives": ["..."],
+      "deliverables": ["..."],
+      "success_criteria": ["..."]
     }
-  ];
-}
-
-function generateComponents(idea) {
-  const ideaLower = idea.toLowerCase();
-  
-  const components = [
+  ],
+  "components": [
     {
-      name: 'API Server',
-      purpose: 'Handle business logic and data operations',
-      complexity: 'medium',
-      dependencies: ['Database', 'Authentication'],
-      build_notes: ['RESTful design', 'Rate limiting', 'Error handling']
-    },
-    {
-      name: 'Frontend Application',
-      purpose: 'User interface and interaction',
-      complexity: 'medium',
-      dependencies: ['API Server'],
-      build_notes: ['Responsive design', 'Accessibility', 'Performance optimization']
-    },
-    {
-      name: 'Database',
-      purpose: 'Data persistence and retrieval',
-      complexity: 'medium',
-      dependencies: [],
-      build_notes: ['Schema design', 'Indexing', 'Backup strategy']
-    },
-    {
-      name: 'Authentication & Authorization',
-      purpose: 'User identity and access control',
-      complexity: 'high',
-      dependencies: ['Database'],
-      build_notes: ['OAuth/JWT', 'Role-based access', 'Security best practices']
+      "name": "...",
+      "purpose": "...",
+      "complexity": "low|medium|high",
+      "dependencies": ["..."],
+      "build_notes": ["..."]
     }
-  ];
-  
-  // Add conditional components based on idea
-  if (ideaLower.includes('ai') || ideaLower.includes('machine learning')) {
-    components.push({
-      name: 'AI/ML Integration',
-      purpose: 'Machine learning model inference and training',
-      complexity: 'high',
-      dependencies: ['API Server', 'Database'],
-      build_notes: ['Model selection', 'Training pipeline', 'Inference optimization']
-    });
-  }
-  
-  if (ideaLower.includes('real-time') || ideaLower.includes('websocket')) {
-    components.push({
-      name: 'Real-time Communication',
-      purpose: 'WebSocket or event-driven updates',
-      complexity: 'high',
-      dependencies: ['API Server'],
-      build_notes: ['Connection management', 'Message queuing', 'Scalability']
-    });
-  }
-  
-  if (ideaLower.includes('integration') || ideaLower.includes('api')) {
-    components.push({
-      name: 'Third-party Integrations',
-      purpose: 'Connect with external services',
-      complexity: 'medium',
-      dependencies: ['API Server'],
-      build_notes: ['API client libraries', 'Error handling', 'Webhook support']
-    });
-  }
-  
-  return components;
-}
-
-function generateRoles(teamSize) {
-  const roles = [
+  ],
+  "roles": [
     {
-      role: 'Product Manager',
-      responsibilities: [
-        'Define requirements and priorities',
-        'Communicate with stakeholders',
-        'Track progress and manage scope'
-      ]
-    },
-    {
-      role: 'Backend Engineer',
-      responsibilities: [
-        'Design and implement APIs',
-        'Manage database schema',
-        'Handle integrations'
-      ]
-    },
-    {
-      role: 'Frontend Engineer',
-      responsibilities: [
-        'Build user interface',
-        'Implement client-side logic',
-        'Optimize performance'
-      ]
+      "role": "...",
+      "responsibilities": ["..."]
     }
-  ];
-  
-  // Add QA role for larger teams
-  if (teamSize === '4-6' || teamSize === '7+') {
-    roles.push({
-      role: 'QA Engineer',
-      responsibilities: [
-        'Test functionality and edge cases',
-        'Automate test suite',
-        'Report and track bugs'
+  ],
+  "milestones": [
+    {
+      "milestone": "...",
+      "week": 0,
+      "acceptance_criteria": ["..."]
+    }
+  ],
+  "open_questions": ["..."],
+  "immediate_next_actions": ["..."]
+}`;
+
+/**
+ * Call Claude 3.5 Sonnet to generate execution plan
+ */
+async function generatePlanWithClaude(projectId, ideaContent, feasibilityArtifact) {
+  try {
+    console.log(`[PlanningJob] Calling Claude 3.5 Sonnet for project ${projectId}`);
+    
+    const feasibilityContext = feasibilityArtifact 
+      ? JSON.stringify(feasibilityArtifact, null, 2)
+      : 'Feasibility analysis not available or failed validation';
+    
+    const userPrompt = `Create a detailed execution plan for this project:
+
+Project ID: ${projectId}
+
+IDEA:
+${ideaContent}
+
+FEASIBILITY ANALYSIS:
+${feasibilityContext}
+
+Return the execution_plan_v1 JSON object. The plan must be realistic, internally consistent, and account for the risks and assumptions identified in feasibility.`;
+
+    const response = await client.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 2000,
+      temperature: 0.3,
+      system: PLANNING_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: userPrompt
+        }
       ]
     });
-  }
-  
-  // Add DevOps role for larger teams
-  if (teamSize === '7+') {
-    roles.push({
-      role: 'DevOps Engineer',
-      responsibilities: [
-        'Set up CI/CD pipeline',
-        'Manage infrastructure',
-        'Monitor production systems'
-      ]
-    });
-  }
-  
-  return roles;
-}
 
-function generateMilestones(timelineWeeks) {
-  const milestones = [];
-  
-  // Week 1-2: Discovery complete
-  milestones.push({
-    milestone: 'Discovery & Requirements Complete',
-    week: Math.ceil(timelineWeeks * 0.2),
-    acceptance_criteria: [
-      'Requirements document approved',
-      'Architecture designed',
-      'Team ready to build'
-    ]
-  });
-  
-  // Mid-project: Core features done
-  milestones.push({
-    milestone: 'Core Features Implemented',
-    week: Math.ceil(timelineWeeks * 0.6),
-    acceptance_criteria: [
-      'MVP features working',
-      'APIs functional',
-      'Basic testing passing'
-    ]
-  });
-  
-  // Week before launch: Testing complete
-  milestones.push({
-    milestone: 'Testing & QA Complete',
-    week: Math.ceil(timelineWeeks * 0.8),
-    acceptance_criteria: [
-      'Critical bugs fixed',
-      'Performance optimized',
-      'Security audit passed'
-    ]
-  });
-  
-  // Final: Launch
-  milestones.push({
-    milestone: 'Production Launch',
-    week: timelineWeeks,
-    acceptance_criteria: [
-      'System live',
-      'Monitoring active',
-      'Support team ready'
-    ]
-  });
-  
-  // Add mid-point milestone
-  milestones.push({
-    milestone: 'Mid-Project Review',
-    week: Math.ceil(timelineWeeks * 0.5),
-    acceptance_criteria: [
-      'Progress on track',
-      'No blocking issues',
-      'Stakeholder alignment'
-    ]
-  });
-  
-  return milestones.sort((a, b) => a.week - b.week);
-}
+    const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
+    
+    // Log token usage and cost
+    const inputTokens = response.usage.input_tokens;
+    const outputTokens = response.usage.output_tokens;
+    const estimatedCost = (inputTokens * 0.003 + outputTokens * 0.015) / 1000; // Claude 3.5 Sonnet pricing
+    
+    console.log(`[PlanningJob] Claude response received`);
+    console.log(`[PlanningJob] Tokens: input=${inputTokens}, output=${outputTokens}, cost=$${estimatedCost.toFixed(4)}`);
 
-function generateOpenQuestions(feasibilityData) {
-  const questions = [
-    'What is the target user scale and growth trajectory?',
-    'Are there regulatory or compliance requirements?',
-    'What is the budget and resource allocation?',
-    'How will success be measured?'
-  ];
-  
-  if (feasibilityData && feasibilityData.unknowns) {
-    questions.push(...feasibilityData.unknowns.slice(0, 2));
+    // Parse JSON response
+    let artifact;
+    try {
+      artifact = JSON.parse(responseText);
+    } catch (parseError) {
+      console.warn(`[PlanningJob] JSON parse error, attempting repair`);
+      // Try to extract JSON from response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        artifact = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('Could not extract valid JSON from Claude response');
+      }
+    }
+
+    return {
+      artifact,
+      tokens: { input: inputTokens, output: outputTokens },
+      cost: estimatedCost
+    };
+  } catch (error) {
+    console.error(`[PlanningJob] Claude API error:`, error.message);
+    throw error;
   }
-  
-  return questions;
-}
-
-function generateImmediateActions(idea) {
-  return [
-    'Schedule kickoff meeting with all stakeholders',
-    'Set up development environment and repositories',
-    'Create detailed project timeline in project management tool',
-    'Establish communication channels and meeting cadence',
-    'Assign team members to roles and responsibilities',
-    'Set up CI/CD pipeline and deployment infrastructure',
-    'Create initial database schema and API specifications',
-    'Begin first sprint with highest-priority features'
-  ];
 }
 
 /**
- * Main planning job
- * 
- * Pattern:
- * 1. Load idea content
- * 2. Load feasibility artifact (if available)
- * 3. Generate artifact
- * 4. Validate artifact
- * 5. Use fallback if validation fails
- * 6. Persist artifact
- * 7. Advance project stage
+ * Main planning job with Claude integration
  */
 async function processPlanningJob(job) {
   const { projectId } = job.data;
+  const startTime = Date.now();
   
   try {
     // Begin transaction
@@ -386,15 +195,26 @@ async function processPlanningJob(job) {
       }
     }
     
-    // 3. Generate execution plan artifact
-    let artifact = generateExecutionPlan(projectId, ideaContent, feasibilityData);
+    // 3. Call Claude to generate execution plan
+    let artifact, tokens, cost;
+    try {
+      const result = await generatePlanWithClaude(projectId, ideaContent, feasibilityData);
+      artifact = result.artifact;
+      tokens = result.tokens;
+      cost = result.cost;
+    } catch (claudeError) {
+      console.error(`[PlanningJob] Claude generation failed, using fallback`);
+      artifact = generatePlanFallback(projectId, [claudeError.message]);
+      tokens = { input: 0, output: 0 };
+      cost = 0;
+    }
     
     // 4. Validate artifact
     const validation = validatePlan(artifact);
     
     // 5. Use fallback if validation fails
     if (!validation.ok) {
-      console.warn(`[PlanningJob] Validation failed for project ${projectId}:`, validation.errors);
+      console.warn(`[PlanningJob] Validation failed:`, validation.errors);
       artifact = generatePlanFallback(projectId, validation.errors);
       console.log(`[PlanningJob] Using fallback artifact`);
     }
@@ -406,10 +226,9 @@ async function processPlanningJob(job) {
       [artifactId, projectId, 'planning', PLAN_TYPE, PLAN_TYPE, JSON.stringify(artifact)]
     );
     
-    console.log(`[PlanningJob] Persisted artifact ${artifactId} for project ${projectId}`);
+    console.log(`[PlanningJob] Persisted artifact ${artifactId}`);
     
     // 7. Advance project stage
-    console.log(`[PlanningJob] Updating project ${projectId}: stage → PlanningComplete`);
     await query(
       'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
       ['PlanningComplete', projectId]
@@ -418,16 +237,26 @@ async function processPlanningJob(job) {
     // Commit transaction
     await query('COMMIT');
     
+    const duration = Date.now() - startTime;
+    
     console.log(`[PlanningJob] Completed for project ${projectId}`);
     console.log(`[PlanningJob] Timeline: ${artifact.timeline_weeks} weeks, ${artifact.phases.length} phases`);
+    console.log(`[PlanningJob] Duration: ${duration}ms, Cost: $${cost.toFixed(4)}`);
     
-    return {
+    // Log run metrics
+    const result = {
       ok: true,
       projectId,
       timeline_weeks: artifact.timeline_weeks,
       phases: artifact.phases.length,
-      validated: validation.ok
+      validated: validation.ok,
+      tokens,
+      cost,
+      duration
     };
+    
+    logPlanningRun(projectId, result);
+    return result;
   } catch (error) {
     // Rollback transaction
     await query('ROLLBACK');

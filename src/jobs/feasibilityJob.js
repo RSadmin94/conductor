@@ -1,209 +1,152 @@
 const { query } = require('../db');
 const { randomUUID } = require('crypto');
 const { FEASIBILITY_TYPE, validateFeasibility, generateFeasibilityFallback } = require('../intelligence/contracts');
+const { logFeasibilityRun } = require('../utils/runLogger');
+const Anthropic = require('@anthropic-ai/sdk');
+
+const client = new Anthropic();
 
 /**
- * Generate feasibility_analysis_v1 artifact
- * 
- * In production, this would call an AI model (GPT, Claude, etc.)
- * For MVP, we generate a realistic analysis based on idea content
+ * System prompt for Claude 3.5 Sonnet - Feasibility Analysis
+ * Ensures strict JSON output with no placeholders or generic content
  */
-function generateFeasibilityAnalysis(projectId, ideaContent) {
-  const ideaLower = ideaContent.toLowerCase();
-  
-  // Determine verdict based on complexity indicators
-  let verdict = 'go';
-  let confidence = 0.75;
-  
-  const complexityIndicators = ['blockchain', 'quantum', 'neural network', 'real-time', 'distributed'];
-  const riskIndicators = ['security', 'compliance', 'integration', 'scale', 'privacy'];
-  
-  const hasComplexity = complexityIndicators.some(indicator => ideaLower.includes(indicator));
-  const hasRisks = riskIndicators.some(indicator => ideaLower.includes(indicator));
-  
-  if (hasComplexity && hasRisks) {
-    verdict = 'revise';
-    confidence = 0.55;
-  } else if (hasComplexity) {
-    confidence = 0.65;
+const FEASIBILITY_SYSTEM_PROMPT = `You are Conductor, a senior technical product + engineering analyst. Your job is to evaluate a single project idea and output a STRICT JSON object that conforms exactly to the feasibility_analysis_v1 schema.
+
+OUTPUT RULES (NON-NEGOTIABLE):
+- Output MUST be valid JSON only. No markdown, no commentary, no code fences.
+- Do NOT include placeholder text (e.g., "TBD", "standard risks", "pending", "various", "N/A").
+- Be specific to the idea provided. Use concrete risks, assumptions, unknowns, and next steps.
+- Use concise but substantive language. Avoid generic buzzwords.
+- If the user's idea is ambiguous, infer reasonable assumptions and list them under key_assumptions and unknowns.
+- Ensure minimum counts:
+  - risks: at least 5 items
+  - key_assumptions: 3–7 items
+  - unknowns: 3–7 items
+  - recommended_next_steps: 5–10 items
+- confidence MUST be a number from 0.0 to 1.0.
+- verdict MUST be one of: "go", "revise", "no_go".
+- likelihood and impact MUST be one of: "low", "medium", "high".
+
+CONFIDENCE GUIDELINE:
+- Confidence reflects strength of recommendation given the information quality and known risks, NOT probability of success.
+- Higher confidence when: scope is clear, path is proven, risks are manageable, unknowns are limited.
+- Lower confidence when: unclear user/market, heavy integration dependence, unclear data/privacy, unclear feasibility.
+
+ESTIMATES GUIDELINE:
+- mvp_weeks: realistic MVP timeline assuming a lean build.
+- team_size: choose one of "solo", "2-3", "4-6", "7+".
+- cost_band: choose one of "low", "medium", "high" based on complexity and dependencies.
+
+SUGGESTED_STACK:
+- Provide 1–4 items per category. Keep it practical and MVP-oriented. Avoid exotic tech unless necessary.
+
+QUALITY BAR:
+This should read like an experienced tech lead advising whether to proceed, including uncomfortable risks and clear next steps.
+
+Return ONLY valid JSON matching this exact structure:
+{
+  "schema_version": "v1",
+  "idea": {
+    "project_id": "...",
+    "idea_id": "...",
+    "title": "...",
+    "one_liner": "..."
+  },
+  "verdict": "go|revise|no_go",
+  "confidence": 0.0,
+  "summary": "...",
+  "key_assumptions": ["..."],
+  "risks": [
+    {"risk":"...","likelihood":"low|medium|high","impact":"low|medium|high","mitigation":"..."}
+  ],
+  "unknowns": ["..."],
+  "recommended_next_steps": ["..."],
+  "suggested_stack": {
+    "frontend": ["..."],
+    "backend": ["..."],
+    "data": ["..."],
+    "ai": ["..."],
+    "infra": ["..."]
+  },
+  "estimates": {
+    "mvp_weeks": 0,
+    "team_size": "solo|2-3|4-6|7+",
+    "cost_band": "low|medium|high"
   }
-  
-  // Build the feasibility analysis object
-  const analysis = {
-    schema_version: 'v1',
-    idea: {
-      project_id: projectId,
-      idea_id: randomUUID(),
-      title: ideaContent.substring(0, 80),
-      one_liner: ideaContent.substring(0, 160)
-    },
-    verdict: verdict,
-    confidence: confidence,
-    summary: generateSummary(ideaContent, verdict),
-    key_assumptions: generateAssumptions(ideaContent),
-    risks: generateRisks(ideaContent),
-    unknowns: generateUnknowns(ideaContent),
-    recommended_next_steps: generateNextSteps(ideaContent, verdict),
-    suggested_stack: generateStack(ideaContent),
-    estimates: {
-      mvp_weeks: hasComplexity ? 10 : 6,
-      team_size: hasComplexity ? '4-6' : '2-3',
-      cost_band: hasComplexity ? 'high' : 'medium'
+}`;
+
+/**
+ * Call Claude 3.5 Sonnet to generate feasibility analysis
+ */
+async function generateFeasibilityWithClaude(projectId, ideaId, ideaContent) {
+  try {
+    console.log(`[FeasibilityJob] Calling Claude 3.5 Sonnet for project ${projectId}`);
+    
+    const userPrompt = `Analyze this project idea and return ONLY valid JSON:
+
+Project ID: ${projectId}
+Idea ID: ${ideaId}
+
+IDEA:
+${ideaContent}
+
+Return the feasibility_analysis_v1 JSON object.`;
+
+    const response = await client.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 1500,
+      temperature: 0.3,
+      system: FEASIBILITY_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: userPrompt
+        }
+      ]
+    });
+
+    const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
+    
+    // Log token usage and cost
+    const inputTokens = response.usage.input_tokens;
+    const outputTokens = response.usage.output_tokens;
+    const estimatedCost = (inputTokens * 0.003 + outputTokens * 0.015) / 1000; // Claude 3.5 Sonnet pricing
+    
+    console.log(`[FeasibilityJob] Claude response received`);
+    console.log(`[FeasibilityJob] Tokens: input=${inputTokens}, output=${outputTokens}, cost=$${estimatedCost.toFixed(4)}`);
+
+    // Parse JSON response
+    let artifact;
+    try {
+      artifact = JSON.parse(responseText);
+    } catch (parseError) {
+      console.warn(`[FeasibilityJob] JSON parse error, attempting repair`);
+      // Try to extract JSON from response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        artifact = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('Could not extract valid JSON from Claude response');
+      }
     }
-  };
-  
-  return analysis;
-}
 
-function generateSummary(idea, verdict) {
-  const ideaPreview = idea.substring(0, 100);
-  
-  if (verdict === 'go') {
-    return `This project is technically feasible and aligns with current market trends. The core concept of "${ideaPreview}..." is achievable with standard technologies and a focused team. Success depends on clear requirements definition and realistic timeline expectations.`;
-  } else if (verdict === 'revise') {
-    return `This project shows promise but requires refinement before proceeding. The concept of "${ideaPreview}..." involves complexity that needs further analysis. Recommend clarifying scope, dependencies, and resource constraints before full commitment.`;
-  } else {
-    return `This project faces significant technical or market challenges. The concept of "${ideaPreview}..." would require substantial resources or novel approaches. Consider pivoting scope or exploring alternative approaches.`;
+    return {
+      artifact,
+      tokens: { input: inputTokens, output: outputTokens },
+      cost: estimatedCost
+    };
+  } catch (error) {
+    console.error(`[FeasibilityJob] Claude API error:`, error.message);
+    throw error;
   }
-}
-
-function generateAssumptions(idea) {
-  return [
-    'Team has access to required technologies and platforms',
-    'Project scope remains stable during initial development',
-    'Stakeholders are available for requirements clarification',
-    'External dependencies (APIs, services) remain available',
-    'Budget and timeline estimates are realistic for team size'
-  ];
-}
-
-function generateRisks(idea) {
-  const ideaLower = idea.toLowerCase();
-  const risks = [];
-  
-  // Base risks
-  risks.push({
-    risk: 'Scope creep during development',
-    likelihood: 'high',
-    impact: 'high',
-    mitigation: 'Define clear MVP scope and use iterative delivery'
-  });
-  
-  risks.push({
-    risk: 'Technical complexity underestimation',
-    likelihood: 'medium',
-    impact: 'high',
-    mitigation: 'Conduct technical spike for critical components'
-  });
-  
-  risks.push({
-    risk: 'Resource availability constraints',
-    likelihood: 'medium',
-    impact: 'medium',
-    mitigation: 'Secure team commitments early and plan for contingencies'
-  });
-  
-  // Conditional risks based on idea content
-  if (ideaLower.includes('ai') || ideaLower.includes('machine learning')) {
-    risks.push({
-      risk: 'Model accuracy and performance variability',
-      likelihood: 'high',
-      impact: 'high',
-      mitigation: 'Establish clear performance baselines and testing frameworks'
-    });
-  }
-  
-  if (ideaLower.includes('integration') || ideaLower.includes('api')) {
-    risks.push({
-      risk: 'Third-party API changes or deprecation',
-      likelihood: 'medium',
-      impact: 'medium',
-      mitigation: 'Design abstraction layers and monitor API status'
-    });
-  }
-  
-  if (ideaLower.includes('security') || ideaLower.includes('data')) {
-    risks.push({
-      risk: 'Security vulnerabilities and data protection',
-      likelihood: 'medium',
-      impact: 'high',
-      mitigation: 'Implement security reviews and compliance checks early'
-    });
-  }
-  
-  return risks;
-}
-
-function generateUnknowns(idea) {
-  return [
-    'Exact user requirements and feature prioritization',
-    'Integration points with existing systems',
-    'Performance and scalability requirements',
-    'Regulatory or compliance constraints',
-    'Team skill gaps and training needs'
-  ];
-}
-
-function generateNextSteps(idea, verdict) {
-  const steps = [
-    'Conduct detailed requirements workshop with stakeholders',
-    'Create technical architecture diagram',
-    'Identify and evaluate technology options',
-    'Break down project into phases and milestones',
-    'Define success metrics and acceptance criteria'
-  ];
-  
-  if (verdict === 'revise') {
-    steps.push('Address identified risks and unknowns');
-    steps.push('Refine scope and get stakeholder alignment');
-  }
-  
-  steps.push('Schedule kickoff meeting and team onboarding');
-  steps.push('Establish communication and reporting cadence');
-  
-  return steps;
-}
-
-function generateStack(idea) {
-  const ideaLower = idea.toLowerCase();
-  
-  const stack = {
-    frontend: ['React', 'TypeScript', 'TailwindCSS'],
-    backend: ['Node.js', 'Express'],
-    data: ['PostgreSQL'],
-    ai: [],
-    infra: ['Docker', 'Render']
-  };
-  
-  // Adjust stack based on idea content
-  if (ideaLower.includes('ai') || ideaLower.includes('machine learning')) {
-    stack.ai = ['OpenAI API', 'LangChain'];
-  }
-  
-  if (ideaLower.includes('real-time') || ideaLower.includes('websocket')) {
-    stack.backend.push('Socket.io');
-  }
-  
-  if (ideaLower.includes('mobile')) {
-    stack.frontend = ['React Native', 'Expo'];
-  }
-  
-  return stack;
 }
 
 /**
- * Main feasibility job
- * 
- * Pattern:
- * 1. Load idea content
- * 2. Generate artifact
- * 3. Validate artifact
- * 4. Use fallback if validation fails
- * 5. Persist artifact
- * 6. Advance project stage
+ * Main feasibility job with Claude integration
  */
 async function processFeasibilityJob(job) {
   const { projectId } = job.data;
+  const startTime = Date.now();
   
   try {
     // Begin transaction
@@ -220,17 +163,29 @@ async function processFeasibilityJob(job) {
     }
     
     const ideaContent = ideaResult.rows[0].content;
+    const ideaId = 'latest';
     
-    // 2. Generate feasibility artifact
-    let artifact = generateFeasibilityAnalysis(projectId, ideaContent);
+    // 2. Call Claude to generate feasibility analysis
+    let artifact, tokens, cost;
+    try {
+      const result = await generateFeasibilityWithClaude(projectId, ideaId, ideaContent);
+      artifact = result.artifact;
+      tokens = result.tokens;
+      cost = result.cost;
+    } catch (claudeError) {
+      console.error(`[FeasibilityJob] Claude generation failed, using fallback`);
+      artifact = generateFeasibilityFallback(projectId, ideaId, ideaContent, [claudeError.message]);
+      tokens = { input: 0, output: 0 };
+      cost = 0;
+    }
     
     // 3. Validate artifact
     const validation = validateFeasibility(artifact);
     
     // 4. Use fallback if validation fails
     if (!validation.ok) {
-      console.warn(`[FeasibilityJob] Validation failed for project ${projectId}:`, validation.errors);
-      artifact = generateFeasibilityFallback(projectId, 'latest', ideaContent, validation.errors);
+      console.warn(`[FeasibilityJob] Validation failed:`, validation.errors);
+      artifact = generateFeasibilityFallback(projectId, ideaId, ideaContent, validation.errors);
       console.log(`[FeasibilityJob] Using fallback artifact`);
     }
     
@@ -241,10 +196,9 @@ async function processFeasibilityJob(job) {
       [artifactId, projectId, 'feasibility', FEASIBILITY_TYPE, FEASIBILITY_TYPE, JSON.stringify(artifact)]
     );
     
-    console.log(`[FeasibilityJob] Persisted artifact ${artifactId} for project ${projectId}`);
+    console.log(`[FeasibilityJob] Persisted artifact ${artifactId}`);
     
     // 6. Advance project stage
-    console.log(`[FeasibilityJob] Updating project ${projectId}: stage=Idea → FeasibilityComplete`);
     await query(
       'UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3',
       ['FeasibilityComplete', 'Active', projectId]
@@ -253,16 +207,26 @@ async function processFeasibilityJob(job) {
     // Commit transaction
     await query('COMMIT');
     
+    const duration = Date.now() - startTime;
+    
     console.log(`[FeasibilityJob] Completed for project ${projectId}`);
     console.log(`[FeasibilityJob] Verdict: ${artifact.verdict}, Confidence: ${artifact.confidence}`);
+    console.log(`[FeasibilityJob] Duration: ${duration}ms, Cost: $${cost.toFixed(4)}`);
     
-    return {
+    // Log run metrics
+    const result = {
       ok: true,
       projectId,
       verdict: artifact.verdict,
       confidence: artifact.confidence,
-      validated: validation.ok
+      validated: validation.ok,
+      tokens,
+      cost,
+      duration
     };
+    
+    logFeasibilityRun(projectId, result);
+    return result;
   } catch (error) {
     // Rollback transaction
     await query('ROLLBACK');
