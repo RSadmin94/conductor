@@ -106,12 +106,67 @@ async function query(sql, params = []) {
     return result([{ id: project.id, state: project.state, stage: project.stage }]);
   }
 
+  // SELECT id, state, stage, created_at, updated_at FROM projects WHERE id = $1
+  if (/^SELECT\s+ID,\s*STATE,\s*STAGE,\s*CREATED_AT,\s*UPDATED_AT\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
+    const [id] = params;
+    const project = memory.projects.get(id);
+    if (!project) return result([]);
+    return result([{
+      id: project.id,
+      state: project.state,
+      stage: project.stage,
+      created_at: project.created_at,
+      updated_at: project.updated_at || project.created_at
+    }]);
+  }
+
   // SELECT * FROM projects WHERE id = $1
   if (/^SELECT\s+\*\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
     const [id] = params;
     const project = memory.projects.get(id);
     if (!project) return result([]);
     return result([project]);
+  }
+
+  // UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3
+  if (/^UPDATE\s+PROJECTS\s+SET\s+STAGE\s*=\s*\$1,\s*STATE\s*=\s*\$2,\s*UPDATED_AT\s*=\s*NOW\(\)\s+WHERE\s+ID\s*=\s*\$3/.test(s)) {
+    const [stage, state, id] = params;
+    const project = memory.projects.get(id);
+    if (!project) return result([], 0);
+    project.stage = stage;
+    project.state = state;
+    project.updated_at = new Date().toISOString();
+    memory.projects.set(id, project);
+    return result([], 1);
+  }
+
+  // SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1
+  if (/^SELECT\s+CONTENT\s+FROM\s+IDEAS\s+WHERE\s+PROJECT_ID\s*=\s*\$1\s+ORDER\s+BY\s+CREATED_AT\s+DESC\s+LIMIT\s+1/.test(s)) {
+    const [projectId] = params;
+    let latestIdea = null;
+    for (const idea of memory.ideas.values()) {
+      if (idea.project_id === projectId) {
+        if (!latestIdea || new Date(idea.created_at) > new Date(latestIdea.created_at)) {
+          latestIdea = idea;
+        }
+      }
+    }
+    if (!latestIdea) return result([]);
+    return result([{ content: latestIdea.content }]);
+  }
+
+  // INSERT INTO decisions (id, project_id, stage, outcome, rationale) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (project_id, stage) DO NOTHING
+  if (/^INSERT INTO DECISIONS\s*\(ID,\s*PROJECT_ID,\s*STAGE,\s*OUTCOME,\s*RATIONALE\)\s*VALUES\s*\(\$1,\s*\$2,\s*\$3,\s*\$4,\s*\$5\)\s+ON\s+CONFLICT\s*\(PROJECT_ID,\s*STAGE\)\s+DO\s+NOTHING/.test(s)) {
+    // For MVP, we don't need to store decisions in memory
+    // Just return success (1 row affected, even if it was a no-op due to conflict)
+    return result([], 1);
+  }
+
+  // INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING
+  if (/^INSERT INTO ARTIFACTS\s*\(ID,\s*PROJECT_ID,\s*STAGE,\s*TYPE,\s*NAME,\s*CONTENT\)\s*VALUES\s*\(\$1,\s*\$2,\s*\$3,\s*\$4,\s*\$5,\s*\$6\)\s+ON\s+CONFLICT\s*\(PROJECT_ID,\s*STAGE,\s*TYPE\)\s+DO\s+NOTHING/.test(s)) {
+    // For MVP, we don't need to store artifacts in memory
+    // Just return success
+    return result([], 1);
   }
 
   // SELECT helpers (optional but useful)
