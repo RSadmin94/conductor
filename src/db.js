@@ -9,6 +9,7 @@ const memory = {
   ideas: new Map(),    // id -> { id, project_id, content, created_at }
   artifacts: new Map(), // id -> { id, project_id, type, name, content, uri, created_at }
   decisions: new Map(), // id -> { id, project_id, outcome, rationale, created_at }
+  runs: new Map(),     // id -> { id, project_id, state, started_at, ended_at }
 };
 
 // Initialize database connection if DATABASE_URL is provided
@@ -104,6 +105,34 @@ async function query(sql, params = []) {
   if (s.startsWith("INSERT INTO ARTIFACTS") && s.includes("ON CONFLICT")) {
     // For MVP, we don't store artifacts in memory
     // Just return success
+    return result([], 1);
+  }
+
+  // INSERT INTO runs (id, project_id, state, started_at) VALUES ($1, $2, $3, NOW())
+  // INSERT INTO runs (id, project_id, state, started_at, ended_at) VALUES ($1, $2, $3, NOW(), NOW())
+  if (s.startsWith("INSERT INTO RUNS") && s.includes("VALUES")) {
+    const [id, projectId, state] = params;
+
+    if (!id) throw new Error("runs.id is required");
+    if (!projectId) throw new Error("runs.project_id is required");
+    if (!state) throw new Error("runs.state is required");
+
+    if (memory.runs.has(id)) {
+      const err = new Error("duplicate key value violates unique constraint \"runs_pkey\"");
+      err.code = "23505";
+      throw err;
+    }
+
+    const row = {
+      id,
+      project_id: projectId,
+      state,
+      started_at: new Date().toISOString(),
+      ended_at: null
+    };
+    memory.runs.set(id, row);
+
+    if (s.includes("RETURNING")) return result([row], 1);
     return result([], 1);
   }
 
