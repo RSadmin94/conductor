@@ -169,6 +169,13 @@ async function query(sql, params = []) {
     return result([], 1);
   }
 
+  // SELECT outcome, rationale, created_at FROM decisions WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1
+  if (/^SELECT\s+OUTCOME,\s*RATIONALE,\s*CREATED_AT\s+FROM\s+DECISIONS\s+WHERE\s+PROJECT_ID\s*=\s*\$1\s+ORDER\s+BY\s+CREATED_AT\s+DESC\s+LIMIT\s+1/.test(s)) {
+    // For MVP, we don't store decisions in memory, so return empty
+    // This is fine because the GET endpoint handles empty results gracefully
+    return result([]);
+  }
+
   // SELECT helpers (optional but useful)
   if (/^SELECT\s+\*\s+FROM\s+PROJECTS\b/.test(s)) {
     return result([...memory.projects.values()]);
