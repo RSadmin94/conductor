@@ -1,4 +1,15 @@
-let currentProjectId = null;
+// Initialize currentProjectId from localStorage
+let currentProjectId = localStorage.getItem('conductorProjectId');
+
+// On page load, restore UI state if projectId exists
+window.addEventListener('DOMContentLoaded', () => {
+    if (currentProjectId) {
+        document.getElementById('projectSection').classList.remove('hidden');
+        document.getElementById('artifactsSection').classList.remove('hidden');
+        document.getElementById('reportSection').classList.remove('hidden');
+        updateProjectStatus();
+    }
+});
 
 async function createIdea() {
     const content = document.getElementById('ideaContent').value.trim();
@@ -26,6 +37,7 @@ async function createIdea() {
         
         const data = await response.json();
         currentProjectId = data.projectId;
+        localStorage.setItem('conductorProjectId', currentProjectId);
         
         document.getElementById('projectSection').classList.remove('hidden');
         document.getElementById('artifactsSection').classList.remove('hidden');
@@ -269,6 +281,11 @@ async function updateArtifacts() {
 }
 
 async function viewReport() {
+    // Restore projectId from localStorage if needed
+    if (!currentProjectId) {
+        currentProjectId = localStorage.getItem('conductorProjectId');
+    }
+    
     if (!currentProjectId) {
         alert('No project selected');
         return;
