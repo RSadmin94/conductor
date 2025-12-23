@@ -7,162 +7,213 @@ const Anthropic = require('@anthropic-ai/sdk');
 const client = new Anthropic();
 
 /**
- * System prompt for Claude 3.5 Sonnet - Execution Planning
- * Ensures strict JSON output with realistic, concrete plans
+ * Sub-generator 1: Phases and Timeline
+ * Returns: { phases: [...], timeline_weeks: number }
  */
-const PLANNING_SYSTEM_PROMPT = `You are Conductor, a senior delivery lead + architect. Your job is to create a concrete execution plan for a project based on the idea and the feasibility analysis artifact, and output a STRICT JSON object that conforms exactly to the execution_plan_v1 schema.
+async function generatePhasesAndTimeline(ideaContent, feasibilityData) {
+  const prompt = `You are a project planning expert. Based on this project idea and feasibility analysis, generate a realistic project timeline with 4 phases.
 
-OUTPUT RULES (NON-NEGOTIABLE):
-- Output MUST be valid JSON only. No markdown, no commentary, no code fences.
-- Do NOT include placeholder text (e.g., "TBD", "standard tasks", "various", "N/A").
-- The plan MUST be consistent with the feasibility analysis verdict, risks, and assumptions.
-- If feasibility verdict is "no_go": still produce a plan, but it should focus on a "revise/validate first" plan with short timeline, heavy discovery, and clear stop conditions.
-- Ensure minimum counts:
-  - phases: at least 4 phases (Discovery, Build, Test, Launch — naming can vary but must map to these)
-  - milestones: at least 5 items
-  - immediate_next_actions: at least 7 items
-  - components: at least 6 items (unless the project is truly tiny; still try for 6)
-- timeline_weeks should approximately equal the sum of phases.duration_weeks (be honest).
-- complexity MUST be one of: "low", "medium", "high".
+IDEA: ${ideaContent}
 
-PHASE STRUCTURE:
-- Discovery & Requirements (20% of timeline)
-- Core Build (50% of timeline)
-- Testing & Refinement (20% of timeline)
-- Launch & Deployment (10% of timeline)
+FEASIBILITY VERDICT: ${feasibilityData?.verdict || 'unknown'}
+ESTIMATED MVP WEEKS: ${feasibilityData?.estimates?.mvp_weeks || 10}
 
-COMPONENT QUALITY BAR:
-- Map to real software parts (auth, data model, API, UI, background jobs, observability, security)
-- Include dependencies between components
-- Assign realistic complexity levels
-- Include build notes for implementation guidance
-
-MILESTONE QUALITY BAR:
-- Milestones must be testable outcomes, not vague intentions
-- Include explicit risk-mitigating tasks drawn from feasibility risks
-- Acceptance criteria must be measurable
-
-IMMEDIATE NEXT ACTIONS QUALITY BAR:
-- Must be actionable within 24–72 hours
-- Should include: setup, planning, communication, and resource allocation
-- Should be specific (not "start building" but "set up CI/CD pipeline")
-
-If feasibility is missing or obviously low-confidence, increase open_questions and make Phase 1 discovery heavier.
-
-Return ONLY valid JSON matching this exact structure:
+Return ONLY valid JSON:
 {
-  "schema_version": "v1",
-  "project_id": "...",
-  "timeline_weeks": 0,
+  "timeline_weeks": number,
   "phases": [
     {
-      "name": "...",
-      "duration_weeks": 0,
-      "objectives": ["..."],
-      "deliverables": ["..."],
-      "success_criteria": ["..."]
+      "name": "Phase name",
+      "duration_weeks": number,
+      "objectives": ["objective 1", "objective 2"],
+      "deliverables": ["deliverable 1", "deliverable 2"],
+      "success_criteria": ["criteria 1", "criteria 2"]
     }
-  ],
+  ]
+}
+
+Requirements:
+- Exactly 4 phases: Discovery, Build, Test, Launch (names can vary)
+- timeline_weeks = sum of all phase duration_weeks
+- Each phase must have 2-3 objectives, deliverables, and success criteria
+- Be realistic based on feasibility verdict`;
+
+  const response = await client.messages.create({
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 600,
+    temperature: 0.2,
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  const text = response.content[0].text;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON found in phases response');
+  
+  return JSON.parse(jsonMatch[0]);
+}
+
+/**
+ * Sub-generator 2: Components
+ * Returns: { components: [...] }
+ */
+async function generateComponents(ideaContent, feasibilityData) {
+  const prompt = `You are a software architect. Based on this project idea, list the core components needed.
+
+IDEA: ${ideaContent}
+
+TECHNOLOGY STACK: ${feasibilityData?.suggested_stack ? JSON.stringify(feasibilityData.suggested_stack) : 'standard web stack'}
+
+Return ONLY valid JSON:
+{
   "components": [
     {
-      "name": "...",
-      "purpose": "...",
+      "name": "Component name",
+      "purpose": "What it does",
       "complexity": "low|medium|high",
-      "dependencies": ["..."],
-      "build_notes": ["..."]
+      "dependencies": ["dependency1", "dependency2"],
+      "build_notes": ["note1", "note2"]
     }
-  ],
+  ]
+}
+
+Requirements:
+- At least 6 components
+- Include: API, Frontend, Database, Auth, Integration, Infrastructure
+- Each component must have 1-2 dependencies and 2-3 build notes
+- Be specific to the project type`;
+
+  const response = await client.messages.create({
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 700,
+    temperature: 0.2,
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  const text = response.content[0].text;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON found in components response');
+  
+  return JSON.parse(jsonMatch[0]);
+}
+
+/**
+ * Sub-generator 3: Roles and Milestones
+ * Returns: { roles: [...], milestones: [...] }
+ */
+async function generateRolesAndMilestones(ideaContent, phasesData) {
+  const phaseNames = phasesData.phases.map(p => `${p.name} (${p.duration_weeks}w)`).join(', ');
+  
+  const prompt = `You are a project manager. Based on these project phases, define team roles and milestones.
+
+PHASES: ${phaseNames}
+TOTAL TIMELINE: ${phasesData.timeline_weeks} weeks
+
+Return ONLY valid JSON:
+{
   "roles": [
     {
-      "role": "...",
-      "responsibilities": ["..."]
+      "role": "Role name",
+      "responsibilities": ["responsibility1", "responsibility2", "responsibility3"]
     }
   ],
   "milestones": [
     {
-      "milestone": "...",
-      "week": 0,
-      "acceptance_criteria": ["..."]
+      "milestone": "Milestone name",
+      "week": number,
+      "acceptance_criteria": ["criteria1", "criteria2"]
     }
-  ],
-  "open_questions": ["..."],
-  "immediate_next_actions": ["..."]
-}`;
+  ]
+}
 
-/**
- * Call Claude 3.5 Sonnet to generate execution plan
- */
-async function generatePlanWithClaude(projectId, ideaContent, feasibilityArtifact) {
-  try {
-    console.log(`[PlanningJob] Calling Claude 3.5 Sonnet for project ${projectId}`);
-    
-    const feasibilityContext = feasibilityArtifact 
-      ? JSON.stringify(feasibilityArtifact, null, 2)
-      : 'Feasibility analysis not available or failed validation';
-    
-    const userPrompt = `Create a detailed execution plan for this project:
+Requirements:
+- 3-5 roles (e.g., Product Manager, Backend Engineer, Frontend Engineer, DevOps, QA)
+- At least 5 milestones spread across the timeline
+- Each role needs 2-3 responsibilities
+- Each milestone needs 2-3 acceptance criteria
+- Milestone weeks should map to phase boundaries`;
 
-Project ID: ${projectId}
+  const response = await client.messages.create({
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 600,
+    temperature: 0.2,
+    messages: [{ role: 'user', content: prompt }]
+  });
 
-IDEA:
-${ideaContent}
-
-FEASIBILITY ANALYSIS:
-${feasibilityContext}
-
-Return the execution_plan_v1 JSON object. The plan must be realistic, internally consistent, and account for the risks and assumptions identified in feasibility.`;
-
-    const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 2000,
-      temperature: 0.3,
-      system: PLANNING_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: userPrompt
-        }
-      ]
-    });
-
-    const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
-    
-    // Log token usage and cost
-    const inputTokens = response.usage.input_tokens;
-    const outputTokens = response.usage.output_tokens;
-    const estimatedCost = (inputTokens * 0.003 + outputTokens * 0.015) / 1000; // Claude 3.5 Sonnet pricing
-    
-    console.log(`[PlanningJob] Claude response received`);
-    console.log(`[PlanningJob] Tokens: input=${inputTokens}, output=${outputTokens}, cost=$${estimatedCost.toFixed(4)}`);
-
-    // Parse JSON response
-    let artifact;
-    try {
-      artifact = JSON.parse(responseText);
-    } catch (parseError) {
-      console.warn(`[PlanningJob] JSON parse error, attempting repair`);
-      // Try to extract JSON from response
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        artifact = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('Could not extract valid JSON from Claude response');
-      }
-    }
-
-    return {
-      artifact,
-      tokens: { input: inputTokens, output: outputTokens },
-      cost: estimatedCost
-    };
-  } catch (error) {
-    console.error(`[PlanningJob] Claude API error:`, error.message);
-    throw error;
-  }
+  const text = response.content[0].text;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON found in roles/milestones response');
+  
+  return JSON.parse(jsonMatch[0]);
 }
 
 /**
- * Main planning job with Claude integration
+ * Sub-generator 4: Open Questions and Next Actions
+ * Returns: { open_questions: [...], immediate_next_actions: [...] }
+ */
+async function generateOpenQuestionsAndNextActions(ideaContent, feasibilityData) {
+  const risks = feasibilityData?.risks?.map(r => r.risk).slice(0, 3).join(', ') || 'standard project risks';
+  
+  const prompt = `You are a project strategist. Based on this project and its risks, identify open questions and immediate next actions.
+
+IDEA: ${ideaContent}
+
+TOP RISKS: ${risks}
+
+Return ONLY valid JSON:
+{
+  "open_questions": ["question1", "question2", "question3"],
+  "immediate_next_actions": ["action1", "action2", "action3", "action4", "action5"]
+}
+
+Requirements:
+- 3-5 open questions that need clarification before or during the project
+- At least 7 immediate next actions (first 72 hours)
+- Actions should be specific and actionable
+- Include: kickoff, setup, planning, communication, resource allocation
+- Questions should address risks and unknowns`;
+
+  const response = await client.messages.create({
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 500,
+    temperature: 0.2,
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  const text = response.content[0].text;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON found in questions/actions response');
+  
+  return JSON.parse(jsonMatch[0]);
+}
+
+/**
+ * Assemble and validate the final execution plan
+ */
+function assemblePlan(projectId, phasesData, componentsData, rolesData, questionsData) {
+  const plan = {
+    schema_version: 'v1',
+    project_id: projectId,
+    timeline_weeks: phasesData.timeline_weeks,
+    phases: phasesData.phases,
+    components: componentsData.components,
+    roles: rolesData.roles,
+    milestones: rolesData.milestones,
+    open_questions: questionsData.open_questions,
+    immediate_next_actions: questionsData.immediate_next_actions
+  };
+
+  // Validate minimum counts
+  const errors = [];
+  if (!plan.phases || plan.phases.length < 4) errors.push('phases must have at least 4 items');
+  if (!plan.components || plan.components.length < 6) errors.push('components must have at least 6 items');
+  if (!plan.milestones || plan.milestones.length < 5) errors.push('milestones must have at least 5 items');
+  if (!plan.immediate_next_actions || plan.immediate_next_actions.length < 7) errors.push('immediate_next_actions must have at least 7 items');
+
+  return { plan, errors };
+}
+
+/**
+ * Main planning job with sub-generators
  */
 async function processPlanningJob(job) {
   const { projectId } = job.data;
@@ -195,31 +246,29 @@ async function processPlanningJob(job) {
       }
     }
     
-    // 3. Call Claude to generate execution plan
-    let artifact, tokens, cost;
-    try {
-      const result = await generatePlanWithClaude(projectId, ideaContent, feasibilityData);
-      artifact = result.artifact;
-      tokens = result.tokens;
-      cost = result.cost;
-    } catch (claudeError) {
-      console.error(`[PlanningJob] Claude generation failed, using fallback`);
-      artifact = generatePlanFallback(projectId, [claudeError.message]);
-      tokens = { input: 0, output: 0 };
-      cost = 0;
+    // 3. Generate plan sub-components
+    console.log(`[PlanningJob] Generating phases and timeline for project ${projectId}`);
+    const phasesData = await generatePhasesAndTimeline(ideaContent, feasibilityData);
+    
+    console.log(`[PlanningJob] Generating components`);
+    const componentsData = await generateComponents(ideaContent, feasibilityData);
+    
+    console.log(`[PlanningJob] Generating roles and milestones`);
+    const rolesData = await generateRolesAndMilestones(ideaContent, phasesData);
+    
+    console.log(`[PlanningJob] Generating open questions and next actions`);
+    const questionsData = await generateOpenQuestionsAndNextActions(ideaContent, feasibilityData);
+    
+    // 4. Assemble and validate
+    const { plan, errors } = assemblePlan(projectId, phasesData, componentsData, rolesData, questionsData);
+    
+    let artifact = plan;
+    if (errors.length > 0) {
+      console.warn(`[PlanningJob] Validation errors:`, errors);
+      artifact = generatePlanFallback(projectId, errors);
     }
     
-    // 4. Validate artifact
-    const validation = validatePlan(artifact);
-    
-    // 5. Use fallback if validation fails
-    if (!validation.ok) {
-      console.warn(`[PlanningJob] Validation failed:`, validation.errors);
-      artifact = generatePlanFallback(projectId, validation.errors);
-      console.log(`[PlanningJob] Using fallback artifact`);
-    }
-    
-    // 6. Persist artifact
+    // 5. Persist artifact
     const artifactId = randomUUID();
     await query(
       'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
@@ -228,7 +277,7 @@ async function processPlanningJob(job) {
     
     console.log(`[PlanningJob] Persisted artifact ${artifactId}`);
     
-    // 7. Advance project stage
+    // 6. Advance project stage
     await query(
       'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
       ['PlanningComplete', projectId]
@@ -241,17 +290,16 @@ async function processPlanningJob(job) {
     
     console.log(`[PlanningJob] Completed for project ${projectId}`);
     console.log(`[PlanningJob] Timeline: ${artifact.timeline_weeks} weeks, ${artifact.phases.length} phases`);
-    console.log(`[PlanningJob] Duration: ${duration}ms, Cost: $${cost.toFixed(4)}`);
+    console.log(`[PlanningJob] Duration: ${duration}ms`);
     
-    // Log run metrics
     const result = {
       ok: true,
       projectId,
       timeline_weeks: artifact.timeline_weeks,
       phases: artifact.phases.length,
-      validated: validation.ok,
-      tokens,
-      cost,
+      validated: errors.length === 0,
+      tokens: { input: 0, output: 0 }, // Not tracked for sub-calls
+      cost: 0,
       duration
     };
     
