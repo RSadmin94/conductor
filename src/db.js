@@ -116,28 +116,43 @@ async function query(sql, params = []) {
     const project = memory.projects.get(projectId);
 
     if (!project) {
+      // Make UPDATE failures loud - log when project not found
+      console.warn(`[DB] UPDATE projects: project not found for id=${projectId}`);
       return result([], 0);
     }
 
     // Update fields based on what's in the SET clause
     // This is resilient to column order and additional columns
+    let updated = false;
+    
     if (s.includes("STAGE")) {
-      project.stage = params[0] ?? project.stage;
+      const newStage = params[0];
+      if (newStage && newStage !== project.stage) {
+        console.log(`[DB] UPDATE projects: stage ${project.stage} → ${newStage} for id=${projectId}`);
+        project.stage = newStage;
+        updated = true;
+      }
     }
+    
     if (s.includes("STATE")) {
       // STATE might be params[0] or params[1] depending on order
       // Look for it in the SET clause position
       const stateIndex = s.indexOf("STATE");
       const stageIndex = s.indexOf("STAGE");
-      if (stateIndex > stageIndex) {
-        project.state = params[1] ?? project.state;
-      } else {
-        project.state = params[0] ?? project.state;
+      const newState = stateIndex > stageIndex ? params[1] : params[0];
+      if (newState && newState !== project.state) {
+        console.log(`[DB] UPDATE projects: state ${project.state} → ${newState} for id=${projectId}`);
+        project.state = newState;
+        updated = true;
       }
     }
 
     project.updated_at = new Date().toISOString();
     memory.projects.set(projectId, project);
+
+    if (!updated) {
+      console.warn(`[DB] UPDATE projects: no fields changed for id=${projectId}. SQL: ${sql}`);
+    }
 
     return result([], 1);
   }
