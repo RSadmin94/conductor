@@ -39,17 +39,19 @@ Requirements:
 - Be realistic based on feasibility verdict`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-1-20250805',
+    model: 'claude-sonnet-4-5-20250929',
     max_tokens: 600,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
   });
 
   const text = response.content[0].text;
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in phases response');
-  
-  return JSON.parse(jsonMatch[0]);
+  // Extract JSON safely: find first { and last }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in phases response');
+  const jsonStr = text.substring(firstBrace, lastBrace + 1);
+  return JSON.parse(jsonStr);
 }
 
 /**
@@ -83,17 +85,19 @@ Requirements:
 - Be specific to the project type`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-1-20250805',
+    model: 'claude-sonnet-4-5-20250929',
     max_tokens: 700,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
   });
 
   const text = response.content[0].text;
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in components response');
-  
-  return JSON.parse(jsonMatch[0]);
+  // Extract JSON safely: find first { and last }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in components response');
+  const jsonStr = text.substring(firstBrace, lastBrace + 1);
+  return JSON.parse(jsonStr);
 }
 
 /**
@@ -133,17 +137,19 @@ Requirements:
 - Milestone weeks should map to phase boundaries`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-1-20250805',
+    model: 'claude-sonnet-4-5-20250929',
     max_tokens: 600,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
   });
 
   const text = response.content[0].text;
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in roles/milestones response');
-  
-  return JSON.parse(jsonMatch[0]);
+  // Extract JSON safely: find first { and last }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in roles/milestones response');
+  const jsonStr = text.substring(firstBrace, lastBrace + 1);
+  return JSON.parse(jsonStr);
 }
 
 /**
@@ -173,17 +179,19 @@ Requirements:
 - Questions should address risks and unknowns`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-1-20250805',
+    model: 'claude-sonnet-4-5-20250929',
     max_tokens: 500,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
   });
 
   const text = response.content[0].text;
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in questions/actions response');
-  
-  return JSON.parse(jsonMatch[0]);
+  // Extract JSON safely: find first { and last }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in questions/actions response');
+  const jsonStr = text.substring(firstBrace, lastBrace + 1);
+  return JSON.parse(jsonStr);
 }
 
 /**
