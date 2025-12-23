@@ -1,71 +1,17 @@
 const { query } = require('../db');
 const { randomUUID } = require('crypto');
-const { fallbacks } = require('../schemas/artifacts');
-
-async function processFeasibilityJob(job) {
-  const { projectId } = job.data;
-  
-  try {
-    // Begin transaction (no-op for in-memory)
-    await query('BEGIN');
-    
-    // Get idea content
-    const ideaResult = await query(
-      'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
-      [projectId]
-    );
-    
-    if (ideaResult.rows.length === 0) {
-      throw new Error('No idea found for project');
-    }
-    
-    const ideaContent = ideaResult.rows[0].content;
-    
-    // Generate feasibility_analysis_v1 artifact
-    // In production, this would call an AI model (GPT, Claude, etc.)
-    // For now, we generate a realistic structured analysis based on the idea
-    const feasibilityAnalysis = generateFeasibilityAnalysis(projectId, ideaContent);
-    
-    // Create artifact with type: feasibility_analysis_v1
-    const artifactContent = JSON.stringify(feasibilityAnalysis);
-    
-    await query(
-      'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
-      [randomUUID(), projectId, 'feasibility', 'feasibility_analysis_v1', 'feasibility_analysis_v1', artifactContent]
-    );
-    
-    // Update project stage
-    console.log(`[FeasibilityJob] Updating project ${projectId}: stage=Idea → FeasibilityComplete`);
-    await query(
-      'UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3',
-      ['FeasibilityComplete', 'Active', projectId]
-    );
-    
-    // Commit transaction (no-op for in-memory)
-    await query('COMMIT');
-    
-    console.log(`[FeasibilityJob] Completed for project ${projectId}`);
-    console.log(`[FeasibilityJob] Verdict: ${feasibilityAnalysis.verdict}, Confidence: ${feasibilityAnalysis.confidence}`);
-    
-    return { projectId, verdict: feasibilityAnalysis.verdict, confidence: feasibilityAnalysis.confidence };
-  } catch (error) {
-    // Rollback transaction (no-op for in-memory)
-    await query('ROLLBACK');
-    console.error(`[FeasibilityJob] Error for project ${projectId}:`, error.message);
-    throw error;
-  }
-}
+const { FEASIBILITY_TYPE, validateFeasibility, generateFeasibilityFallback } = require('../intelligence/contracts');
 
 /**
  * Generate feasibility_analysis_v1 artifact
- * In production, this would call an AI model
- * For MVP, we generate a realistic analysis based on idea keywords
+ * 
+ * In production, this would call an AI model (GPT, Claude, etc.)
+ * For MVP, we generate a realistic analysis based on idea content
  */
 function generateFeasibilityAnalysis(projectId, ideaContent) {
-  // Extract key indicators from idea content
   const ideaLower = ideaContent.toLowerCase();
   
-  // Determine verdict based on idea complexity indicators
+  // Determine verdict based on complexity indicators
   let verdict = 'go';
   let confidence = 0.75;
   
@@ -89,7 +35,7 @@ function generateFeasibilityAnalysis(projectId, ideaContent) {
       project_id: projectId,
       idea_id: randomUUID(),
       title: ideaContent.substring(0, 80),
-      one_liner: ideaContent.substring(0, 120)
+      one_liner: ideaContent.substring(0, 160)
     },
     verdict: verdict,
     confidence: confidence,
@@ -243,6 +189,86 @@ function generateStack(idea) {
   }
   
   return stack;
+}
+
+/**
+ * Main feasibility job
+ * 
+ * Pattern:
+ * 1. Load idea content
+ * 2. Generate artifact
+ * 3. Validate artifact
+ * 4. Use fallback if validation fails
+ * 5. Persist artifact
+ * 6. Advance project stage
+ */
+async function processFeasibilityJob(job) {
+  const { projectId } = job.data;
+  
+  try {
+    // Begin transaction
+    await query('BEGIN');
+    
+    // 1. Load latest idea content
+    const ideaResult = await query(
+      'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [projectId]
+    );
+    
+    if (ideaResult.rows.length === 0) {
+      throw new Error('No idea found for project');
+    }
+    
+    const ideaContent = ideaResult.rows[0].content;
+    
+    // 2. Generate feasibility artifact
+    let artifact = generateFeasibilityAnalysis(projectId, ideaContent);
+    
+    // 3. Validate artifact
+    const validation = validateFeasibility(artifact);
+    
+    // 4. Use fallback if validation fails
+    if (!validation.ok) {
+      console.warn(`[FeasibilityJob] Validation failed for project ${projectId}:`, validation.errors);
+      artifact = generateFeasibilityFallback(projectId, 'latest', ideaContent, validation.errors);
+      console.log(`[FeasibilityJob] Using fallback artifact`);
+    }
+    
+    // 5. Persist artifact
+    const artifactId = randomUUID();
+    await query(
+      'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
+      [artifactId, projectId, 'feasibility', FEASIBILITY_TYPE, FEASIBILITY_TYPE, JSON.stringify(artifact)]
+    );
+    
+    console.log(`[FeasibilityJob] Persisted artifact ${artifactId} for project ${projectId}`);
+    
+    // 6. Advance project stage
+    console.log(`[FeasibilityJob] Updating project ${projectId}: stage=Idea → FeasibilityComplete`);
+    await query(
+      'UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3',
+      ['FeasibilityComplete', 'Active', projectId]
+    );
+    
+    // Commit transaction
+    await query('COMMIT');
+    
+    console.log(`[FeasibilityJob] Completed for project ${projectId}`);
+    console.log(`[FeasibilityJob] Verdict: ${artifact.verdict}, Confidence: ${artifact.confidence}`);
+    
+    return {
+      ok: true,
+      projectId,
+      verdict: artifact.verdict,
+      confidence: artifact.confidence,
+      validated: validation.ok
+    };
+  } catch (error) {
+    // Rollback transaction
+    await query('ROLLBACK');
+    console.error(`[FeasibilityJob] Error for project ${projectId}:`, error.message);
+    throw error;
+  }
 }
 
 module.exports = { processFeasibilityJob };

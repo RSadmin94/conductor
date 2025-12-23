@@ -1,82 +1,10 @@
 const { query } = require('../db');
 const { randomUUID } = require('crypto');
-
-async function processPlanningJob(job) {
-  const { projectId } = job.data;
-  
-  try {
-    // Begin transaction (no-op for in-memory)
-    await query('BEGIN');
-    
-    // Get project to verify it exists
-    const projectResult = await query(
-      'SELECT stage FROM projects WHERE id = $1',
-      [projectId]
-    );
-    
-    if (projectResult.rows.length === 0) {
-      throw new Error('Project not found');
-    }
-    
-    // Get latest idea content
-    const ideaResult = await query(
-      'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
-      [projectId]
-    );
-    
-    const ideaContent = ideaResult.rows.length > 0 ? ideaResult.rows[0].content : 'Unknown project';
-    
-    // Get feasibility analysis artifact to inform planning
-    const feasibilityResult = await query(
-      'SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1',
-      [projectId, 'feasibility_analysis_v1']
-    );
-    
-    let feasibilityData = null;
-    if (feasibilityResult.rows.length > 0) {
-      try {
-        feasibilityData = JSON.parse(feasibilityResult.rows[0].content);
-      } catch (e) {
-        console.warn('[PlanningJob] Could not parse feasibility artifact');
-      }
-    }
-    
-    // Generate execution_plan_v1 artifact
-    // In production, this would call an AI model
-    const executionPlan = generateExecutionPlan(projectId, ideaContent, feasibilityData);
-    
-    // Create artifact with type: execution_plan_v1
-    const artifactContent = JSON.stringify(executionPlan);
-    
-    await query(
-      'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
-      [randomUUID(), projectId, 'planning', 'execution_plan_v1', 'execution_plan_v1', artifactContent]
-    );
-    
-    // Update project stage
-    console.log(`[PlanningJob] Updating project ${projectId}: stage → PlanningComplete`);
-    await query(
-      'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
-      ['PlanningComplete', projectId]
-    );
-    
-    // Commit transaction (no-op for in-memory)
-    await query('COMMIT');
-    
-    console.log(`[PlanningJob] Completed for project ${projectId}`);
-    console.log(`[PlanningJob] Timeline: ${executionPlan.timeline_weeks} weeks, ${executionPlan.phases.length} phases`);
-    
-    return { projectId, timeline_weeks: executionPlan.timeline_weeks, phases: executionPlan.phases.length };
-  } catch (error) {
-    // Rollback transaction (no-op for in-memory)
-    await query('ROLLBACK');
-    console.error(`[PlanningJob] Error for project ${projectId}:`, error.message);
-    throw error;
-  }
-}
+const { PLAN_TYPE, validatePlan, generatePlanFallback } = require('../intelligence/contracts');
 
 /**
  * Generate execution_plan_v1 artifact
+ * 
  * In production, this would call an AI model
  * For MVP, we generate a realistic plan based on idea and feasibility data
  */
@@ -414,6 +342,98 @@ function generateImmediateActions(idea) {
     'Create initial database schema and API specifications',
     'Begin first sprint with highest-priority features'
   ];
+}
+
+/**
+ * Main planning job
+ * 
+ * Pattern:
+ * 1. Load idea content
+ * 2. Load feasibility artifact (if available)
+ * 3. Generate artifact
+ * 4. Validate artifact
+ * 5. Use fallback if validation fails
+ * 6. Persist artifact
+ * 7. Advance project stage
+ */
+async function processPlanningJob(job) {
+  const { projectId } = job.data;
+  
+  try {
+    // Begin transaction
+    await query('BEGIN');
+    
+    // 1. Load idea content
+    const ideaResult = await query(
+      'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [projectId]
+    );
+    
+    const ideaContent = ideaResult.rows.length > 0 ? ideaResult.rows[0].content : 'Unknown project';
+    
+    // 2. Load feasibility artifact (if available)
+    const feasibilityResult = await query(
+      'SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1',
+      [projectId, 'feasibility_analysis_v1']
+    );
+    
+    let feasibilityData = null;
+    if (feasibilityResult.rows.length > 0) {
+      try {
+        feasibilityData = JSON.parse(feasibilityResult.rows[0].content);
+      } catch (e) {
+        console.warn('[PlanningJob] Could not parse feasibility artifact');
+      }
+    }
+    
+    // 3. Generate execution plan artifact
+    let artifact = generateExecutionPlan(projectId, ideaContent, feasibilityData);
+    
+    // 4. Validate artifact
+    const validation = validatePlan(artifact);
+    
+    // 5. Use fallback if validation fails
+    if (!validation.ok) {
+      console.warn(`[PlanningJob] Validation failed for project ${projectId}:`, validation.errors);
+      artifact = generatePlanFallback(projectId, validation.errors);
+      console.log(`[PlanningJob] Using fallback artifact`);
+    }
+    
+    // 6. Persist artifact
+    const artifactId = randomUUID();
+    await query(
+      'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
+      [artifactId, projectId, 'planning', PLAN_TYPE, PLAN_TYPE, JSON.stringify(artifact)]
+    );
+    
+    console.log(`[PlanningJob] Persisted artifact ${artifactId} for project ${projectId}`);
+    
+    // 7. Advance project stage
+    console.log(`[PlanningJob] Updating project ${projectId}: stage → PlanningComplete`);
+    await query(
+      'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
+      ['PlanningComplete', projectId]
+    );
+    
+    // Commit transaction
+    await query('COMMIT');
+    
+    console.log(`[PlanningJob] Completed for project ${projectId}`);
+    console.log(`[PlanningJob] Timeline: ${artifact.timeline_weeks} weeks, ${artifact.phases.length} phases`);
+    
+    return {
+      ok: true,
+      projectId,
+      timeline_weeks: artifact.timeline_weeks,
+      phases: artifact.phases.length,
+      validated: validation.ok
+    };
+  } catch (error) {
+    // Rollback transaction
+    await query('ROLLBACK');
+    console.error(`[PlanningJob] Error for project ${projectId}:`, error.message);
+    throw error;
+  }
 }
 
 module.exports = { processPlanningJob };
