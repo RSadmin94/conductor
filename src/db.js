@@ -201,6 +201,32 @@ async function query(sql, params = []) {
     return result([]);
   }
 
+  // SELECT ... FROM artifacts WHERE project_id = $1 ...
+  if (s.includes("SELECT") && s.includes("FROM ARTIFACTS") && s.includes("WHERE PROJECT_ID")) {
+    const [projectId] = params;
+    const artifacts = [];
+
+    for (const artifact of memory.artifacts.values()) {
+      if (artifact.project_id === projectId) {
+        artifacts.push(artifact);
+      }
+    }
+
+    if (s.includes("ORDER BY")) {
+      artifacts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
+
+    if (s.includes("LIMIT")) {
+      const limitMatch = s.match(/LIMIT\s+(\d+)/);
+      if (limitMatch) {
+        const limit = parseInt(limitMatch[1]);
+        return result(artifacts.slice(0, limit));
+      }
+    }
+
+    return result(artifacts);
+  }
+
   // SELECT * FROM projects (all projects)
   if (s === "SELECT * FROM PROJECTS") {
     return result([...memory.projects.values()]);
