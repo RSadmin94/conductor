@@ -39,7 +39,7 @@ Requirements:
 - Be realistic based on feasibility verdict`;
 
   const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-opus-4-1-20250805',
     max_tokens: 600,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
@@ -83,7 +83,7 @@ Requirements:
 - Be specific to the project type`;
 
   const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-opus-4-1-20250805',
     max_tokens: 700,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
@@ -133,7 +133,7 @@ Requirements:
 - Milestone weeks should map to phase boundaries`;
 
   const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-opus-4-1-20250805',
     max_tokens: 600,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
@@ -173,7 +173,7 @@ Requirements:
 - Questions should address risks and unknowns`;
 
   const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-opus-4-1-20250805',
     max_tokens: 500,
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }]
