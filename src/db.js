@@ -5,7 +5,7 @@ let pool = null;
 
 // In-memory storage for development/testing
 const memory = {
-  projects: new Map(), // id -> { id, state, stage, created_at }
+  projects: new Map(), // id -> { id, state, stage, created_at, updated_at }
   ideas: new Map(),    // id -> { id, project_id, content, created_at }
 };
 
@@ -44,14 +44,16 @@ async function query(sql, params = []) {
   // In-memory query handler
   const s = normalizeSql(sql);
 
+  // ============================================
+  // INSERT OPERATIONS
+  // ============================================
+
   // INSERT INTO projects (id, state, stage) VALUES ($1, $2, $3)
-  if (/^INSERT INTO PROJECTS\s*\(ID,\s*STATE,\s*STAGE\)\s*VALUES\s*\(\$1,\s*\$2,\s*\$3\)/.test(s)) {
+  if (s.startsWith("INSERT INTO PROJECTS") && s.includes("VALUES")) {
     const [id, state, stage] = params;
 
     if (!id) throw new Error("projects.id is required");
-    // Optional: enforce unique
     if (memory.projects.has(id)) {
-      // mimic PG unique violation-ish behavior
       const err = new Error("duplicate key value violates unique constraint \"projects_pkey\"");
       err.code = "23505";
       throw err;
@@ -60,13 +62,12 @@ async function query(sql, params = []) {
     const row = { id, state, stage, created_at: new Date().toISOString() };
     memory.projects.set(id, row);
 
-    // If caller expects RETURNING *, support it:
-    if (/\sRETURNING\s+\*/.test(s)) return result([row], 1);
+    if (s.includes("RETURNING")) return result([row], 1);
     return result([], 1);
   }
 
   // INSERT INTO ideas (id, project_id, content) VALUES ($1, $2, $3)
-  if (/^INSERT INTO IDEAS\s*\(ID,\s*PROJECT_ID,\s*CONTENT\)\s*VALUES\s*\(\$1,\s*\$2,\s*\$3\)/.test(s)) {
+  if (s.startsWith("INSERT INTO IDEAS") && s.includes("VALUES")) {
     const [id, projectId, content] = params;
 
     if (!id) throw new Error("ideas.id is required");
@@ -86,64 +87,83 @@ async function query(sql, params = []) {
     const row = { id, project_id: projectId, content, created_at: new Date().toISOString() };
     memory.ideas.set(id, row);
 
-    if (/\sRETURNING\s+\*/.test(s)) return result([row], 1);
+    if (s.includes("RETURNING")) return result([row], 1);
     return result([], 1);
   }
 
-  // SELECT id, state FROM projects WHERE id = $1
-  if (/^SELECT\s+ID,\s*STATE\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
-    const [id] = params;
-    const project = memory.projects.get(id);
-    if (!project) return result([]);
-    return result([{ id: project.id, state: project.state }]);
+  // INSERT INTO decisions (...) VALUES (...) ON CONFLICT (...) DO NOTHING
+  if (s.startsWith("INSERT INTO DECISIONS") && s.includes("ON CONFLICT")) {
+    // For MVP, we don't store decisions in memory
+    // Just return success
+    return result([], 1);
   }
 
-  // SELECT id, state, stage FROM projects WHERE id = $1
-  if (/^SELECT\s+ID,\s*STATE,\s*STAGE\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
-    const [id] = params;
-    const project = memory.projects.get(id);
-    if (!project) return result([]);
-    return result([{ id: project.id, state: project.state, stage: project.stage }]);
+  // INSERT INTO artifacts (...) VALUES (...) ON CONFLICT (...) DO NOTHING
+  if (s.startsWith("INSERT INTO ARTIFACTS") && s.includes("ON CONFLICT")) {
+    // For MVP, we don't store artifacts in memory
+    // Just return success
+    return result([], 1);
   }
 
-  // SELECT id, state, stage, created_at, updated_at FROM projects WHERE id = $1
-  if (/^SELECT\s+ID,\s*STATE,\s*STAGE,\s*CREATED_AT,\s*UPDATED_AT\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
-    const [id] = params;
-    const project = memory.projects.get(id);
-    if (!project) return result([]);
-    return result([{
-      id: project.id,
-      state: project.state,
-      stage: project.stage,
-      created_at: project.created_at,
-      updated_at: project.updated_at || project.created_at
-    }]);
+  // ============================================
+  // UPDATE OPERATIONS
+  // ============================================
+
+  // UPDATE projects SET ... WHERE id = $X
+  if (s.startsWith("UPDATE PROJECTS SET") && s.includes("WHERE ID")) {
+    // Extract projectId from params (it's always the last param in WHERE clause)
+    const projectId = params[params.length - 1];
+    const project = memory.projects.get(projectId);
+
+    if (!project) {
+      return result([], 0);
+    }
+
+    // Update fields based on what's in the SET clause
+    // This is resilient to column order and additional columns
+    if (s.includes("STAGE")) {
+      project.stage = params[0] ?? project.stage;
+    }
+    if (s.includes("STATE")) {
+      // STATE might be params[0] or params[1] depending on order
+      // Look for it in the SET clause position
+      const stateIndex = s.indexOf("STATE");
+      const stageIndex = s.indexOf("STAGE");
+      if (stateIndex > stageIndex) {
+        project.state = params[1] ?? project.state;
+      } else {
+        project.state = params[0] ?? project.state;
+      }
+    }
+
+    project.updated_at = new Date().toISOString();
+    memory.projects.set(projectId, project);
+
+    return result([], 1);
   }
 
-  // SELECT * FROM projects WHERE id = $1
-  if (/^SELECT\s+\*\s+FROM\s+PROJECTS\s+WHERE\s+ID\s*=\s*\$1/.test(s)) {
+  // ============================================
+  // SELECT OPERATIONS
+  // ============================================
+
+  // SELECT ... FROM projects WHERE id = $1
+  if (s.includes("SELECT") && s.includes("FROM PROJECTS") && s.includes("WHERE ID")) {
     const [id] = params;
     const project = memory.projects.get(id);
-    if (!project) return result([]);
+
+    if (!project) {
+      return result([]);
+    }
+
+    // Return all project fields - let the caller pick what they need
     return result([project]);
   }
 
-  // UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3
-  if (/^UPDATE\s+PROJECTS\s+SET\s+STAGE\s*=\s*\$1,\s*STATE\s*=\s*\$2,\s*UPDATED_AT\s*=\s*NOW\(\)\s+WHERE\s+ID\s*=\s*\$3/.test(s)) {
-    const [stage, state, id] = params;
-    const project = memory.projects.get(id);
-    if (!project) return result([], 0);
-    project.stage = stage;
-    project.state = state;
-    project.updated_at = new Date().toISOString();
-    memory.projects.set(id, project);
-    return result([], 1);
-  }
-
   // SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1
-  if (/^SELECT\s+CONTENT\s+FROM\s+IDEAS\s+WHERE\s+PROJECT_ID\s*=\s*\$1\s+ORDER\s+BY\s+CREATED_AT\s+DESC\s+LIMIT\s+1/.test(s)) {
+  if (s.includes("SELECT") && s.includes("FROM IDEAS") && s.includes("WHERE PROJECT_ID")) {
     const [projectId] = params;
     let latestIdea = null;
+
     for (const idea of memory.ideas.values()) {
       if (idea.project_id === projectId) {
         if (!latestIdea || new Date(idea.created_at) > new Date(latestIdea.created_at)) {
@@ -151,41 +171,44 @@ async function query(sql, params = []) {
         }
       }
     }
-    if (!latestIdea) return result([]);
+
+    if (!latestIdea) {
+      return result([]);
+    }
+
     return result([{ content: latestIdea.content }]);
   }
 
-  // INSERT INTO decisions (id, project_id, stage, outcome, rationale) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (project_id, stage) DO NOTHING
-  if (/^INSERT INTO DECISIONS\s*\(ID,\s*PROJECT_ID,\s*STAGE,\s*OUTCOME,\s*RATIONALE\)\s*VALUES\s*\(\$1,\s*\$2,\s*\$3,\s*\$4,\s*\$5\)\s+ON\s+CONFLICT\s*\(PROJECT_ID,\s*STAGE\)\s+DO\s+NOTHING/.test(s)) {
-    // For MVP, we don't need to store decisions in memory
-    // Just return success (1 row affected, even if it was a no-op due to conflict)
-    return result([], 1);
-  }
-
-  // INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING
-  if (/^INSERT INTO ARTIFACTS\s*\(ID,\s*PROJECT_ID,\s*STAGE,\s*TYPE,\s*NAME,\s*CONTENT\)\s*VALUES\s*\(\$1,\s*\$2,\s*\$3,\s*\$4,\s*\$5,\s*\$6\)\s+ON\s+CONFLICT\s*\(PROJECT_ID,\s*STAGE,\s*TYPE\)\s+DO\s+NOTHING/.test(s)) {
-    // For MVP, we don't need to store artifacts in memory
-    // Just return success
-    return result([], 1);
-  }
-
-  // SELECT outcome, rationale, created_at FROM decisions WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1
-  if (/^SELECT\s+OUTCOME,\s*RATIONALE,\s*CREATED_AT\s+FROM\s+DECISIONS\s+WHERE\s+PROJECT_ID\s*=\s*\$1\s+ORDER\s+BY\s+CREATED_AT\s+DESC\s+LIMIT\s+1/.test(s)) {
+  // SELECT outcome, rationale, created_at FROM decisions WHERE project_id = $1 ...
+  if (s.includes("SELECT") && s.includes("FROM DECISIONS") && s.includes("WHERE PROJECT_ID")) {
     // For MVP, we don't store decisions in memory, so return empty
     // This is fine because the GET endpoint handles empty results gracefully
     return result([]);
   }
 
-  // SELECT helpers (optional but useful)
-  if (/^SELECT\s+\*\s+FROM\s+PROJECTS\b/.test(s)) {
+  // SELECT * FROM projects (all projects)
+  if (s === "SELECT * FROM PROJECTS") {
     return result([...memory.projects.values()]);
   }
 
-  if (/^SELECT\s+\*\s+FROM\s+IDEAS\b/.test(s)) {
+  // SELECT * FROM ideas (all ideas)
+  if (s === "SELECT * FROM IDEAS") {
     return result([...memory.ideas.values()]);
   }
 
-  // Fail loud instead of silently returning empty rows (this prevents "mystery 500s")
+  // ============================================
+  // TRANSACTION CONTROL (no-op for in-memory)
+  // ============================================
+
+  if (s === "BEGIN" || s === "COMMIT" || s === "ROLLBACK") {
+    return result([], 0);
+  }
+
+  // ============================================
+  // FALLBACK: Unsupported SQL
+  // ============================================
+
+  // Fail loud instead of silently returning empty rows
   const err = new Error(`Unsupported SQL in in-memory db.query(): ${sql}`);
   err.code = "INMEM_UNSUPPORTED_SQL";
   throw err;
