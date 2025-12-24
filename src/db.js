@@ -1,4 +1,6 @@
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // CRITICAL: Database configuration is REQUIRED - app must crash on startup if missing
@@ -30,15 +32,58 @@ pool.on('error', (err) => {
   process.exit(1);
 });
 
-console.log('✓ PostgreSQL database connection initialized');
-console.log(`  Host: ${connectionConfig.host}`);
-console.log(`  Database: ${connectionConfig.database}`);
-console.log(`  User: ${connectionConfig.user}`);
+// Initialize schema on startup
+async function initializeSchema() {
+  try {
+    // Read schema.sql from the project root
+    const schemaPath = path.join(__dirname, '..', 'schema.sql');
+    const schema = fs.readFileSync(schemaPath, 'utf8');
+    
+    // Execute schema - this creates tables if they don't exist
+    await pool.query(schema);
+    console.log('✓ Database schema initialized');
+  } catch (err) {
+    console.error('Error initializing schema:', err.message);
+    // Don't exit - schema might already exist
+  }
+}
+
+// Test connection and initialize schema
+async function testConnection() {
+  try {
+    const result = await pool.query('SELECT NOW()');
+    console.log('✓ PostgreSQL database connection initialized');
+    console.log(`  Host: ${connectionConfig.host}`);
+    console.log(`  Database: ${connectionConfig.database}`);
+    console.log(`  User: ${connectionConfig.user}`);
+    
+    // Initialize schema
+    await initializeSchema();
+  } catch (err) {
+    console.error('FATAL: Cannot connect to PostgreSQL:', err.message);
+    process.exit(1);
+  }
+}
+
+// Run connection test immediately
+testConnection().catch(err => {
+  console.error('FATAL: Database initialization failed:', err);
+  process.exit(1);
+});
 
 async function query(sql, params = []) {
   // All queries go directly to PostgreSQL
   // No in-memory fallback - this ensures data persistence
-  return pool.query(sql, params);
+  try {
+    return await pool.query(sql, params);
+  } catch (err) {
+    console.error('Database query error:', {
+      sql: sql.substring(0, 100),
+      error: err.message,
+      code: err.code,
+    });
+    throw err;
+  }
 }
 
 // Export pool and query function
