@@ -8,24 +8,30 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-// Parse DATABASE_URL using a more robust method
+// Parse DATABASE_URL using regex to handle special characters in password
 // Format: postgresql://user:password@host:port/database
 const parseConnectionUrl = (url) => {
   try {
-    // Use URL constructor to parse the connection string
-    const urlObj = new URL(url);
+    // Match: postgresql://username:password@host:port/database
+    const match = url.match(/^postgresql:\/\/([^:]+):(.+)@([^:]+):(\d+)\/(.+)$/);
+    
+    if (!match) {
+      throw new Error('URL does not match expected format');
+    }
+    
+    const [, user, password, host, port, database] = match;
     
     return {
-      host: urlObj.hostname,
-      port: parseInt(urlObj.port) || 5432,
-      database: urlObj.pathname.slice(1), // Remove leading slash
-      user: urlObj.username,
-      password: urlObj.password,
+      host: host.trim(),
+      port: parseInt(port),
+      database: database.trim(),
+      user: user.trim(),
+      password: password.trim(),
     };
   } catch (err) {
     console.error('Failed to parse DATABASE_URL:', err.message);
     console.error('Expected format: postgresql://user:password@host:port/database');
-    console.error('Received:', process.env.DATABASE_URL.substring(0, 50) + '...');
+    console.error('Received:', process.env.DATABASE_URL.substring(0, 80) + '...');
     process.exit(1);
   }
 };
