@@ -3,38 +3,25 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-// CRITICAL: Database configuration is REQUIRED - app must crash on startup if missing
-const requiredEnvVars = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
-const missingVars = requiredEnvVars.filter(v => !process.env[v]);
-
-if (missingVars.length > 0) {
-  console.error('FATAL: Missing required environment variables:');
-  missingVars.forEach(v => console.error(`  - ${v}`));
+// CRITICAL: DATABASE_URL is REQUIRED - app must crash on startup if missing
+if (!process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL environment variable is missing');
   console.error('PostgreSQL persistence is required for production. Exiting.');
   process.exit(1);
 }
 
-// Build connection string with proper SSL configuration
-// Render PostgreSQL requires SSL but has certificate issues, so we use rejectUnauthorized: false
-const connectionString = `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
-
-const connectionConfig = {
-  connectionString,
-  // SSL configuration for Render PostgreSQL
-  ssl: {
-    rejectUnauthorized: false,
-  },
-  // Connection pool settings
-  max: 20,
+// Create Pool using DATABASE_URL with proper SSL configuration for Render PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Render SSL handshake compatibility
+  max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-};
-
-// Initialize database connection
-const pool = new Pool(connectionConfig);
+  connectionTimeoutMillis: 10000,
+  keepAlive: true,
+});
 
 pool.on('error', (err) => {
-  console.error('Database connection error:', err);
+  console.error('[pg] pool error', err);
   process.exit(1);
 });
 
@@ -57,11 +44,9 @@ async function initializeSchema() {
 // Test connection and initialize schema
 async function testConnection() {
   try {
-    const result = await pool.query('SELECT NOW()');
-    console.log('✓ PostgreSQL database connection initialized');
-    console.log(`  Host: ${process.env.DB_HOST}`);
-    console.log(`  Database: ${process.env.DB_NAME}`);
-    console.log(`  User: ${process.env.DB_USER}`);
+    const r = await pool.query('SELECT 1 as ok');
+    console.log('✓ Using PostgreSQL database via DATABASE_URL (SSL enabled)');
+    console.log('[pg] connectivity ok:', r.rows[0]);
     
     // Initialize schema
     await initializeSchema();
