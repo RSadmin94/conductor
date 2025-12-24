@@ -1,14 +1,15 @@
-const { Worker } = require('bullmq');
-const { getRedisConnection } = require('../redis');
-const { processExecutionJob } = require('../jobs/executionJob');
+'''
+import { Worker } from "bullmq";
+import { getRedisConnection } from "../redis.js";
+import { processExecutionJob } from "../jobs/executionJob.js";
 
 let worker = null;
 
-async function startExecutionWorker() {
+export async function startExecutionWorker() {
   const connection = getRedisConnection();
-  
+
   worker = new Worker(
-    'execution',
+    "execution",
     async (job) => {
       console.log(`Processing execution job ${job.id} for project ${job.data.projectId}`);
       return await processExecutionJob(job);
@@ -18,25 +19,23 @@ async function startExecutionWorker() {
       concurrency: 5,
     }
   );
-  
-  worker.on('completed', (job) => {
+
+  worker.on("completed", (job) => {
     console.log(`Execution job ${job.id} completed`);
   });
-  
-  worker.on('failed', (job, err) => {
+
+  worker.on("failed", (job, err) => {
     console.error(`Execution job ${job?.id} failed:`, err);
   });
-  
-  console.log('Execution worker started');
+
+  console.log("Execution worker started");
   return worker;
 }
 
-async function stopExecutionWorker() {
+export async function stopExecutionWorker() {
   if (worker) {
     await worker.close();
     worker = null;
   }
 }
-
-module.exports = { startExecutionWorker, stopExecutionWorker };
-
+'''

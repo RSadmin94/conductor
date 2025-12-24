@@ -1,69 +1,40 @@
-/**
- * Shared Intelligence Contracts
- * 
- * This module defines:
- * - Artifact type constants
- * - Validation functions with clear error reporting
- * - Safe fallback generators
- * 
- * Usage:
- * const { FEASIBILITY_TYPE, validateFeasibility } = require('./contracts');
- * const result = validateFeasibility(artifact);
- * if (!result.ok) { use fallback }
- */
-
 const FEASIBILITY_TYPE = 'feasibility_analysis_v1';
 const PLAN_TYPE = 'execution_plan_v1';
 
-/**
- * Clamp a number to 0-1 range (for confidence scores)
- */
 function clamp01(n) {
   const x = Number(n);
   if (Number.isNaN(x)) return 0;
   return Math.max(0, Math.min(1, x));
 }
 
-/**
- * Validate feasibility_analysis_v1 artifact
- * 
- * Returns: { ok: boolean, errors: string[], artifact: object }
- */
-function validateFeasibility(a) {
+export function validateFeasibility(a) {
   const errors = [];
   
-  // Schema version check
   if (!a || a.schema_version !== 'v1') {
     errors.push('schema_version must be "v1"');
   }
   
-  // Idea metadata
   if (!a?.idea?.project_id) {
     errors.push('idea.project_id is required');
   }
   
-  // Verdict
   if (!a?.verdict || !['go', 'revise', 'no_go'].includes(a.verdict)) {
     errors.push('verdict must be "go", "revise", or "no_go"');
   }
   
-  // Confidence (clamp to 0-1)
   if (typeof a?.confidence === 'number') {
     a.confidence = clamp01(a.confidence);
   } else {
     errors.push('confidence must be a number (0-1)');
   }
   
-  // Summary (minimum length check)
   if (!a?.summary || typeof a.summary !== 'string' || a.summary.length < 20) {
     errors.push('summary must be a string with at least 20 characters');
   }
   
-  // Risks (minimum 5 required)
   if (!Array.isArray(a?.risks) || a.risks.length < 5) {
     errors.push('risks must be an array with at least 5 items');
   } else {
-    // Validate each risk object
     a.risks.forEach((risk, i) => {
       if (!risk.risk || !risk.likelihood || !risk.impact || !risk.mitigation) {
         errors.push(`risks[${i}] missing required fields (risk, likelihood, impact, mitigation)`);
@@ -71,27 +42,22 @@ function validateFeasibility(a) {
     });
   }
   
-  // Key assumptions
   if (!Array.isArray(a?.key_assumptions)) {
     errors.push('key_assumptions must be an array');
   }
   
-  // Unknowns
   if (!Array.isArray(a?.unknowns)) {
     errors.push('unknowns must be an array');
   }
   
-  // Recommended next steps
   if (!Array.isArray(a?.recommended_next_steps)) {
     errors.push('recommended_next_steps must be an array');
   }
   
-  // Suggested stack
   if (!a?.suggested_stack || typeof a.suggested_stack !== 'object') {
     errors.push('suggested_stack must be an object');
   }
   
-  // Estimates
   if (!a?.estimates || typeof a.estimates !== 'object') {
     errors.push('estimates must be an object');
   }
@@ -103,29 +69,20 @@ function validateFeasibility(a) {
   };
 }
 
-/**
- * Validate execution_plan_v1 artifact
- * 
- * Returns: { ok: boolean, errors: string[], artifact: object }
- */
-function validatePlan(p) {
+export function validatePlan(p) {
   const errors = [];
   
-  // Schema version check
   if (!p || p.schema_version !== 'v1') {
     errors.push('schema_version must be "v1"');
   }
   
-  // Project ID
   if (!p?.project_id) {
     errors.push('project_id is required');
   }
   
-  // Phases (minimum 4)
   if (!Array.isArray(p?.phases) || p.phases.length < 4) {
     errors.push('phases must be an array with at least 4 items (Discovery, Build, Test, Launch)');
   } else {
-    // Validate each phase
     p.phases.forEach((phase, i) => {
       if (!phase.name || !Array.isArray(phase.objectives) || !Array.isArray(phase.deliverables)) {
         errors.push(`phases[${i}] missing required fields (name, objectives, deliverables)`);
@@ -133,11 +90,9 @@ function validatePlan(p) {
     });
   }
   
-  // Milestones (minimum 5)
   if (!Array.isArray(p?.milestones) || p.milestones.length < 5) {
     errors.push('milestones must be an array with at least 5 items');
   } else {
-    // Validate each milestone
     p.milestones.forEach((milestone, i) => {
       if (!milestone.milestone || typeof milestone.week !== 'number') {
         errors.push(`milestones[${i}] missing required fields (milestone, week)`);
@@ -145,33 +100,27 @@ function validatePlan(p) {
     });
   }
   
-  // Components
   if (!Array.isArray(p?.components)) {
     errors.push('components must be an array');
   }
   
-  // Roles
   if (!Array.isArray(p?.roles)) {
     errors.push('roles must be an array');
   }
   
-  // Immediate next actions (minimum 7)
   if (!Array.isArray(p?.immediate_next_actions) || p.immediate_next_actions.length < 7) {
     errors.push('immediate_next_actions must be an array with at least 7 items');
   }
   
-  // Open questions
   if (!Array.isArray(p?.open_questions)) {
     errors.push('open_questions must be an array');
   }
   
-  // Timeline sanity check
   const phaseSum = (p?.phases || []).reduce((acc, ph) => acc + (Number(ph.duration_weeks) || 0), 0);
   if (!p?.timeline_weeks || p.timeline_weeks <= 0) {
     p.timeline_weeks = phaseSum || 8;
   }
   
-  // Warn if timeline doesn't match phase sum (but don't fail)
   if (phaseSum > 0 && Math.abs(p.timeline_weeks - phaseSum) > 1) {
     console.warn(`[validatePlan] timeline_weeks (${p.timeline_weeks}) doesn't match phase sum (${phaseSum})`);
   }
@@ -183,10 +132,7 @@ function validatePlan(p) {
   };
 }
 
-/**
- * Generate fallback feasibility artifact when validation fails
- */
-function generateFeasibilityFallback(projectId, ideaId, ideaText, validationErrors) {
+export function generateFeasibilityFallback(projectId, ideaId, ideaText, validationErrors) {
   return {
     schema_version: 'v1',
     idea: {
@@ -256,10 +202,7 @@ function generateFeasibilityFallback(projectId, ideaId, ideaText, validationErro
   };
 }
 
-/**
- * Generate fallback execution plan when validation fails
- */
-function generatePlanFallback(projectId, validationErrors) {
+export function generatePlanFallback(projectId, validationErrors) {
   return {
     schema_version: 'v1',
     project_id: projectId,
@@ -355,12 +298,4 @@ function generatePlanFallback(projectId, validationErrors) {
   };
 }
 
-module.exports = {
-  FEASIBILITY_TYPE,
-  PLAN_TYPE,
-  clamp01,
-  validateFeasibility,
-  validatePlan,
-  generateFeasibilityFallback,
-  generatePlanFallback
-};
+export { FEASIBILITY_TYPE, PLAN_TYPE };

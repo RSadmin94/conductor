@@ -1,8 +1,9 @@
-const { query } = require('../db');
-const { randomUUID } = require('crypto');
-const { FEASIBILITY_TYPE, validateFeasibility, generateFeasibilityFallback } = require('../intelligence/contracts');
-const { logFeasibilityRun } = require('../utils/runLogger');
-const Anthropic = require('@anthropic-ai/sdk');
+'''
+import { pool } from '../db.js';
+import { randomUUID } from 'crypto';
+import { FEASIBILITY_TYPE, validateFeasibility, generateFeasibilityFallback } from '../intelligence/contracts.js';
+import { logFeasibilityRun } from '../utils/runLogger.js';
+import Anthropic from '@anthropic-ai/sdk';
 
 /**
  * Lazy initialization of Anthropic client
@@ -17,10 +18,6 @@ function getAnthropicClient() {
   });
 }
 
-/**
- * System prompt for Claude 3.5 Sonnet - Feasibility Analysis
- * Ensures strict JSON output with no placeholders or generic content
- */
 const FEASIBILITY_SYSTEM_PROMPT = `You are Conductor, a senior technical product + engineering analyst. Your job is to evaluate a single project idea and output a STRICT JSON object that conforms exactly to the feasibility_analysis_v1 schema.
 
 OUTPUT RULES (NON-NEGOTIABLE):
@@ -86,9 +83,6 @@ Return ONLY valid JSON matching this exact structure:
   }
 }`;
 
-/**
- * Call Claude 3.5 Sonnet to generate feasibility analysis
- */
 async function generateFeasibilityWithClaude(projectId, ideaId, ideaContent) {
   try {
     console.log(`[FeasibilityJob] Claude call start`);
@@ -106,7 +100,7 @@ ${ideaContent}
 Return the feasibility_analysis_v1 JSON object.`;
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-3-sonnet-20240229',
       max_tokens: 1200,
       temperature: 0.2,
       system: FEASIBILITY_SYSTEM_PROMPT,
@@ -120,22 +114,19 @@ Return the feasibility_analysis_v1 JSON object.`;
 
     const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
     
-    // Log token usage and cost
     const inputTokens = response.usage.input_tokens;
     const outputTokens = response.usage.output_tokens;
-    const estimatedCost = (inputTokens * 0.003 + outputTokens * 0.015) / 1000; // Claude 3.5 Sonnet pricing
+    const estimatedCost = (inputTokens * 0.003 + outputTokens * 0.015) / 1000;
     
     console.log(`[FeasibilityJob] Claude response received`);
     console.log(`[FeasibilityJob] Tokens: input=${inputTokens}, output=${outputTokens}, cost=$${estimatedCost.toFixed(4)}`);
 
-    // Parse JSON response
     let artifact;
     try {
       artifact = JSON.parse(responseText);
       console.log(`[FeasibilityJob] JSON parsed`);
     } catch (parseError) {
       console.warn(`[FeasibilityJob] JSON parse error, attempting repair`);
-      // Try to extract JSON from response
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         artifact = JSON.parse(jsonMatch[0]);
@@ -156,14 +147,10 @@ Return the feasibility_analysis_v1 JSON object.`;
   }
 }
 
-/**
- * Main feasibility job with Claude integration
- */
-async function processFeasibilityJob(job) {
+export async function processFeasibilityJob(job) {
   const { projectId } = job.data;
   const startTime = Date.now();
   
-  // Startup checks
   console.log('[FeasibilityJob] START', {
     projectId,
     hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
@@ -175,11 +162,9 @@ async function processFeasibilityJob(job) {
   }
   
   try {
-    // Begin transaction
-    await query('BEGIN');
+    await pool.query('BEGIN');
     
-    // 1. Load latest idea content
-    const ideaResult = await query(
+    const ideaResult = await pool.query(
       'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
       [projectId]
     );
@@ -191,7 +176,6 @@ async function processFeasibilityJob(job) {
     const ideaContent = ideaResult.rows[0].content;
     const ideaId = 'latest';
     
-    // 2. Call Claude to generate feasibility analysis
     let artifact, tokens, cost;
     try {
       const result = await generateFeasibilityWithClaude(projectId, ideaId, ideaContent);
@@ -205,34 +189,29 @@ async function processFeasibilityJob(job) {
       cost = 0;
     }
     
-    // 3. Validate artifact
     const validation = validateFeasibility(artifact);
     
-    // 4. Use fallback if validation fails
     if (!validation.ok) {
       console.warn(`[FeasibilityJob] Validation failed:`, validation.errors);
       artifact = generateFeasibilityFallback(projectId, ideaId, ideaContent, validation.errors);
       console.log(`[FeasibilityJob] Using fallback artifact`);
     }
     
-    // 5. Persist artifact
     const artifactId = randomUUID();
-    await query(
+    await pool.query(
       'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
       [artifactId, projectId, 'feasibility', FEASIBILITY_TYPE, FEASIBILITY_TYPE, JSON.stringify(artifact)]
     );
     
     console.log(`[FeasibilityJob] Persisted artifact ${artifactId}`);
     
-    // 6. Advance project stage
-    await query(
+    await pool.query(
       'UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3',
       ['FeasibilityComplete', 'Active', projectId]
     );
     console.log(`[FeasibilityJob] Stage updated → FeasibilityComplete`);
     
-    // Commit transaction
-    await query('COMMIT');
+    await pool.query('COMMIT');
     
     const duration = Date.now() - startTime;
     
@@ -240,7 +219,6 @@ async function processFeasibilityJob(job) {
     console.log(`[FeasibilityJob] Verdict: ${artifact.verdict}, Confidence: ${artifact.confidence}`);
     console.log(`[FeasibilityJob] Duration: ${duration}ms, Cost: $${cost.toFixed(4)}`);
     
-    // Log run metrics
     const result = {
       ok: true,
       projectId,
@@ -256,7 +234,7 @@ async function processFeasibilityJob(job) {
     return result;
   } catch (error) {
     try {
-      await query('ROLLBACK');
+      await pool.query('ROLLBACK');
     } catch (rollbackErr) {
       console.error('[FeasibilityJob] Rollback failed:', rollbackErr.message);
     }
@@ -268,5 +246,4 @@ async function processFeasibilityJob(job) {
     throw error;
   }
 }
-
-module.exports = { processFeasibilityJob };
+'''

@@ -1,79 +1,80 @@
-const { query } = require('../db');
 
-async function getReport(req, res) {
+import { pool } from "../db.js";
+
+export async function getReport(req, res) {
   try {
     const { projectId } = req.params;
-    
+
     // Get project
-    const projectResult = await query(
-      'SELECT id, state, stage, created_at, updated_at FROM projects WHERE id = $1',
+    const projectResult = await pool.query(
+      "SELECT id, state, stage, created_at, updated_at FROM projects WHERE id = $1",
       [projectId]
     );
-    
+
     if (projectResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Project not found' });
+      return res.status(404).json({ error: "Project not found" });
     }
-    
+
     const project = projectResult.rows[0];
-    
+
     // Get idea (latest)
-    const ideaResult = await query(
-      'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
+    const ideaResult = await pool.query(
+      "SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
       [projectId]
     );
-    const idea = ideaResult.rows.length > 0 ? ideaResult.rows[0].content : 'No idea found';
-    
+    const idea = ideaResult.rows.length > 0 ? ideaResult.rows[0].content : "No idea found";
+
     // Get feasibility_analysis_v1 artifact
-    const feasibilityArtifactResult = await query(
-      'SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1',
-      [projectId, 'feasibility_analysis_v1']
+    const feasibilityArtifactResult = await pool.query(
+      "SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1",
+      [projectId, "feasibility_analysis_v1"]
     );
-    
+
     let feasibilityData = null;
     if (feasibilityArtifactResult.rows.length > 0) {
       try {
         feasibilityData = JSON.parse(feasibilityArtifactResult.rows[0].content);
       } catch (e) {
-        console.warn('[Report] Could not parse feasibility artifact');
+        console.warn("[Report] Could not parse feasibility artifact");
       }
     }
-    
+
     // Get execution_plan_v1 artifact
-    const planningArtifactResult = await query(
-      'SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1',
-      [projectId, 'execution_plan_v1']
+    const planningArtifactResult = await pool.query(
+      "SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1",
+      [projectId, "execution_plan_v1"]
     );
-    
+
     let planningData = null;
     if (planningArtifactResult.rows.length > 0) {
       try {
         planningData = JSON.parse(planningArtifactResult.rows[0].content);
       } catch (e) {
-        console.warn('[Report] Could not parse planning artifact');
+        console.warn("[Report] Could not parse planning artifact");
       }
     }
-    
+
     // Get run records
-    const runsResult = await query(
-      'SELECT id, state, started_at, ended_at FROM runs WHERE project_id = $1 ORDER BY started_at DESC',
+    const runsResult = await pool.query(
+      "SELECT id, state, started_at, ended_at FROM runs WHERE project_id = $1 ORDER BY started_at DESC",
       [projectId]
     );
     const runs = runsResult.rows || [];
-    
+
     // Generate comprehensive report
     const report = generateReport(project, idea, feasibilityData, planningData, runs);
-    
-    res.setHeader('Content-Type', 'text/markdown');
+
+    res.setHeader("Content-Type", "text/markdown");
     res.send(report);
   } catch (error) {
-    console.error('Error generating report:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Error generating report:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 }
 
 function generateReport(project, idea, feasibilityData, planningData, runs) {
   const generatedAt = new Date().toISOString();
-  
+
   let report = `# Project Report
 
 ## Header
@@ -144,9 +145,7 @@ function generateFeasibilitySection(feasibilityData) {
   // Verdict and Confidence
   section += `### Verdict: ${feasibilityData.verdict.toUpperCase()}
 
-**Confidence Score:** ${(feasibilityData.confidence * 100).toFixed(0)}%
-
-`;
+**Confidence Score:** ${(feasibilityData.confidence * 100).toFixed(0)}%\n\n`;
 
   // Summary
   if (feasibilityData.summary) {
@@ -161,7 +160,7 @@ ${feasibilityData.summary}
   if (feasibilityData.key_assumptions && feasibilityData.key_assumptions.length > 0) {
     section += `### Key Assumptions
 
-${feasibilityData.key_assumptions.map(a => `- ${a}`).join('\n')}
+${feasibilityData.key_assumptions.map((a) => `- ${a}`).join("\n")}
 
 `;
   }
@@ -173,17 +172,17 @@ ${feasibilityData.key_assumptions.map(a => `- ${a}`).join('\n')}
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
 `;
-    feasibilityData.risks.forEach(risk => {
+    feasibilityData.risks.forEach((risk) => {
       section += `| ${risk.risk} | ${risk.likelihood} | ${risk.impact} | ${risk.mitigation} |\n`;
     });
-    section += '\n';
+    section += "\n";
   }
 
   // Unknowns
   if (feasibilityData.unknowns && feasibilityData.unknowns.length > 0) {
     section += `### Unknowns
 
-${feasibilityData.unknowns.map(u => `- ${u}`).join('\n')}
+${feasibilityData.unknowns.map((u) => `- ${u}`).join("\n")}
 
 `;
   }
@@ -192,7 +191,7 @@ ${feasibilityData.unknowns.map(u => `- ${u}`).join('\n')}
   if (feasibilityData.recommended_next_steps && feasibilityData.recommended_next_steps.length > 0) {
     section += `### Recommended Next Steps
 
-${feasibilityData.recommended_next_steps.map(step => `- ${step}`).join('\n')}
+${feasibilityData.recommended_next_steps.map((step) => `- ${step}`).join("\n")}
 
 `;
   }
@@ -203,19 +202,19 @@ ${feasibilityData.recommended_next_steps.map(step => `- ${step}`).join('\n')}
 
 `;
     if (feasibilityData.suggested_stack.frontend && feasibilityData.suggested_stack.frontend.length > 0) {
-      section += `**Frontend:** ${feasibilityData.suggested_stack.frontend.join(', ')}\n\n`;
+      section += `**Frontend:** ${feasibilityData.suggested_stack.frontend.join(", ")}\n\n`;
     }
     if (feasibilityData.suggested_stack.backend && feasibilityData.suggested_stack.backend.length > 0) {
-      section += `**Backend:** ${feasibilityData.suggested_stack.backend.join(', ')}\n\n`;
+      section += `**Backend:** ${feasibilityData.suggested_stack.backend.join(", ")}\n\n`;
     }
     if (feasibilityData.suggested_stack.data && feasibilityData.suggested_stack.data.length > 0) {
-      section += `**Data:** ${feasibilityData.suggested_stack.data.join(', ')}\n\n`;
+      section += `**Data:** ${feasibilityData.suggested_stack.data.join(", ")}\n\n`;
     }
     if (feasibilityData.suggested_stack.ai && feasibilityData.suggested_stack.ai.length > 0) {
-      section += `**AI/ML:** ${feasibilityData.suggested_stack.ai.join(', ')}\n\n`;
+      section += `**AI/ML:** ${feasibilityData.suggested_stack.ai.join(", ")}\n\n`;
     }
     if (feasibilityData.suggested_stack.infra && feasibilityData.suggested_stack.infra.length > 0) {
-      section += `**Infrastructure:** ${feasibilityData.suggested_stack.infra.join(', ')}\n\n`;
+      section += `**Infrastructure:** ${feasibilityData.suggested_stack.infra.join(", ")}\n\n`;
     }
   }
 
@@ -257,13 +256,13 @@ function generatePlanningSection(planningData) {
 
 `;
       if (phase.objectives && phase.objectives.length > 0) {
-        section += `**Objectives:**\n${phase.objectives.map(o => `- ${o}`).join('\n')}\n\n`;
+        section += `**Objectives:**\n${phase.objectives.map((o) => `- ${o}`).join("\n")}\n\n`;
       }
       if (phase.deliverables && phase.deliverables.length > 0) {
-        section += `**Deliverables:**\n${phase.deliverables.map(d => `- ${d}`).join('\n')}\n\n`;
+        section += `**Deliverables:**\n${phase.deliverables.map((d) => `- ${d}`).join("\n")}\n\n`;
       }
       if (phase.success_criteria && phase.success_criteria.length > 0) {
-        section += `**Success Criteria:**\n${phase.success_criteria.map(c => `- ${c}`).join('\n')}\n\n`;
+        section += `**Success Criteria:**\n${phase.success_criteria.map((c) => `- ${c}`).join("\n")}\n\n`;
       }
     });
   }
@@ -275,11 +274,11 @@ function generatePlanningSection(planningData) {
 | Component | Purpose | Complexity | Dependencies |
 |-----------|---------|-----------|--------------|
 `;
-    planningData.components.forEach(component => {
-      const deps = Array.isArray(component.dependencies) ? component.dependencies.join(', ') : component.dependencies || 'None';
+    planningData.components.forEach((component) => {
+      const deps = Array.isArray(component.dependencies) ? component.dependencies.join(", ") : component.dependencies || "None";
       section += `| ${component.name} | ${component.purpose} | ${component.complexity} | ${deps} |\n`;
     });
-    section += '\n';
+    section += "\n";
   }
 
   // Roles
@@ -287,10 +286,10 @@ function generatePlanningSection(planningData) {
     section += `### Team Roles
 
 `;
-    planningData.roles.forEach(role => {
+    planningData.roles.forEach((role) => {
       section += `#### ${role.role}
 
-${role.responsibilities.map(r => `- ${r}`).join('\n')}
+${role.responsibilities.map((r) => `- ${r}`).join("\n")}
 
 `;
     });
@@ -303,20 +302,20 @@ ${role.responsibilities.map(r => `- ${r}`).join('\n')}
 | Milestone | Week | Acceptance Criteria |
 |-----------|------|-------------------|
 `;
-    planningData.milestones.forEach(milestone => {
-      const criteria = Array.isArray(milestone.acceptance_criteria) 
-        ? milestone.acceptance_criteria.join('; ')
-        : milestone.acceptance_criteria || 'TBD';
+    planningData.milestones.forEach((milestone) => {
+      const criteria = Array.isArray(milestone.acceptance_criteria)
+        ? milestone.acceptance_criteria.join("; ")
+        : milestone.acceptance_criteria || "TBD";
       section += `| ${milestone.milestone} | ${milestone.week} | ${criteria} |\n`;
     });
-    section += '\n';
+    section += "\n";
   }
 
   // Open Questions
   if (planningData.open_questions && planningData.open_questions.length > 0) {
     section += `### Open Questions
 
-${planningData.open_questions.map(q => `- ${q}`).join('\n')}
+${planningData.open_questions.map((q) => `- ${q}`).join("\n")}
 
 `;
   }
@@ -325,7 +324,7 @@ ${planningData.open_questions.map(q => `- ${q}`).join('\n')}
   if (planningData.immediate_next_actions && planningData.immediate_next_actions.length > 0) {
     section += `### Immediate Next Actions
 
-${planningData.immediate_next_actions.map(action => `- ${action}`).join('\n')}
+${planningData.immediate_next_actions.map((action) => `- ${action}`).join("\n")}
 
 `;
   }
@@ -340,14 +339,12 @@ function generateRunsSection(runs) {
 |--------|-------|---------|-------|
 `;
 
-  runs.forEach(run => {
+  runs.forEach((run) => {
     const startedAt = new Date(run.started_at).toLocaleString();
-    const endedAt = run.ended_at ? new Date(run.ended_at).toLocaleString() : 'In Progress';
+    const endedAt = run.ended_at ? new Date(run.ended_at).toLocaleString() : "In Progress";
     section += `| ${run.id.substring(0, 8)}... | ${run.state} | ${startedAt} | ${endedAt} |\n`;
   });
 
-  section += '\n';
+  section += "\n";
   return section;
 }
-
-module.exports = { getReport };

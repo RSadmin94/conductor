@@ -1,36 +1,20 @@
-const fs = require('fs');
-const path = require('path');
 
-/**
- * Global Run Summary Logger
- * 
- * Tracks all project runs with metrics:
- * - tokens used (input + output)
- * - cost per run
- * - total time
- * - verdict and confidence
- * - stage (feasibility, planning, execution)
- * 
- * Used for:
- * - pricing input
- * - margin awareness
- * - investor credibility
- * - internal sanity checks
- */
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const LOG_DIR = path.join(__dirname, '../../logs');
 const RUN_LOG_FILE = path.join(LOG_DIR, 'runs.jsonl');
 
-// Ensure logs directory exists
 function ensureLogDir() {
   if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });
   }
 }
 
-/**
- * Log a single job run
- */
 function logRun(runData) {
   try {
     ensureLogDir();
@@ -48,10 +32,7 @@ function logRun(runData) {
   }
 }
 
-/**
- * Log feasibility job completion
- */
-function logFeasibilityRun(projectId, result) {
+export function logFeasibilityRun(projectId, result) {
   logRun({
     project_id: projectId,
     stage: 'feasibility',
@@ -67,10 +48,7 @@ function logFeasibilityRun(projectId, result) {
   });
 }
 
-/**
- * Log planning job completion
- */
-function logPlanningRun(projectId, result) {
+export function logPlanningRun(projectId, result) {
   logRun({
     project_id: projectId,
     stage: 'planning',
@@ -86,10 +64,7 @@ function logPlanningRun(projectId, result) {
   });
 }
 
-/**
- * Log execution job completion
- */
-function logExecutionRun(projectId, result) {
+export function logExecutionRun(projectId, result) {
   logRun({
     project_id: projectId,
     stage: 'execution',
@@ -98,10 +73,7 @@ function logExecutionRun(projectId, result) {
   });
 }
 
-/**
- * Get summary statistics from all runs
- */
-function getSummaryStats() {
+export function getSummaryStats() {
   try {
     ensureLogDir();
     
@@ -137,7 +109,6 @@ function getSummaryStats() {
       stats.total_tokens += run.tokens_total || 0;
       stats.total_duration_ms += run.duration_ms || 0;
       
-      // By stage
       if (!stats.by_stage[run.stage]) {
         stats.by_stage[run.stage] = {
           count: 0,
@@ -151,7 +122,6 @@ function getSummaryStats() {
       stats.by_stage[run.stage].tokens += run.tokens_total || 0;
       stats.by_stage[run.stage].duration_ms += run.duration_ms || 0;
       
-      // By verdict (feasibility only)
       if (run.verdict) {
         if (!stats.by_verdict[run.verdict]) {
           stats.by_verdict[run.verdict] = { count: 0, avg_confidence: 0 };
@@ -176,10 +146,7 @@ function getSummaryStats() {
   }
 }
 
-/**
- * Print summary statistics to console
- */
-function printSummaryStats() {
+export function printSummaryStats() {
   const stats = getSummaryStats();
   if (!stats) return;
   
@@ -207,12 +174,3 @@ function printSummaryStats() {
   
   console.log('============================\n');
 }
-
-module.exports = {
-  logRun,
-  logFeasibilityRun,
-  logPlanningRun,
-  logExecutionRun,
-  getSummaryStats,
-  printSummaryStats
-};

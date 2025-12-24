@@ -1,21 +1,18 @@
-const { query } = require('../db');
-const { randomUUID } = require('crypto');
-const { PLAN_TYPE, validatePlan, generatePlanFallback } = require('../intelligence/contracts');
-const { logPlanningRun } = require('../utils/runLogger');
-const Anthropic = require('@anthropic-ai/sdk');
+
+import { pool } from "../db.js";
+import { randomUUID } from "crypto";
+import { PLAN_TYPE, validatePlan, generatePlanFallback } from "../intelligence/contracts.js";
+import { logPlanningRun } from "../utils/runLogger.js";
+import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic();
 
-/**
- * Sub-generator 1: Phases and Timeline
- * Returns: { phases: [...], timeline_weeks: number }
- */
 async function generatePhasesAndTimeline(ideaContent, feasibilityData) {
   const prompt = `You are a project planning expert. Based on this project idea and feasibility analysis, generate a realistic project timeline with 4 phases.
 
 IDEA: ${ideaContent}
 
-FEASIBILITY VERDICT: ${feasibilityData?.verdict || 'unknown'}
+FEASIBILITY VERDICT: ${feasibilityData?.verdict || "unknown"}
 ESTIMATED MVP WEEKS: ${feasibilityData?.estimates?.mvp_weeks || 10}
 
 Return ONLY valid JSON:
@@ -39,31 +36,26 @@ Requirements:
 - Be realistic based on feasibility verdict`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: "claude-3-sonnet-20240229",
     max_tokens: 600,
     temperature: 0.2,
-    messages: [{ role: 'user', content: prompt }]
+    messages: [{ role: "user", content: prompt }],
   });
 
   const text = response.content[0].text;
-  // Extract JSON safely: find first { and last }
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in phases response');
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found in phases response");
   const jsonStr = text.substring(firstBrace, lastBrace + 1);
   return JSON.parse(jsonStr);
 }
 
-/**
- * Sub-generator 2: Components
- * Returns: { components: [...] }
- */
 async function generateComponents(ideaContent, feasibilityData) {
   const prompt = `You are a software architect. Based on this project idea, list the core components needed.
 
 IDEA: ${ideaContent}
 
-TECHNOLOGY STACK: ${feasibilityData?.suggested_stack ? JSON.stringify(feasibilityData.suggested_stack) : 'standard web stack'}
+TECHNOLOGY STACK: ${feasibilityData?.suggested_stack ? JSON.stringify(feasibilityData.suggested_stack) : "standard web stack"}
 
 Return ONLY valid JSON:
 {
@@ -85,28 +77,23 @@ Requirements:
 - Be specific to the project type`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: "claude-3-sonnet-20240229",
     max_tokens: 700,
     temperature: 0.2,
-    messages: [{ role: 'user', content: prompt }]
+    messages: [{ role: "user", content: prompt }],
   });
 
   const text = response.content[0].text;
-  // Extract JSON safely: find first { and last }
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in components response');
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found in components response");
   const jsonStr = text.substring(firstBrace, lastBrace + 1);
   return JSON.parse(jsonStr);
 }
 
-/**
- * Sub-generator 3: Roles and Milestones
- * Returns: { roles: [...], milestones: [...] }
- */
 async function generateRolesAndMilestones(ideaContent, phasesData) {
-  const phaseNames = phasesData.phases.map(p => `${p.name} (${p.duration_weeks}w)`).join(', ');
-  
+  const phaseNames = phasesData.phases.map((p) => `${p.name} (${p.duration_weeks}w)`).join(", ");
+
   const prompt = `You are a project manager. Based on these project phases, define team roles and milestones.
 
 PHASES: ${phaseNames}
@@ -137,28 +124,23 @@ Requirements:
 - Milestone weeks should map to phase boundaries`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: "claude-3-sonnet-20240229",
     max_tokens: 600,
     temperature: 0.2,
-    messages: [{ role: 'user', content: prompt }]
+    messages: [{ role: "user", content: prompt }],
   });
 
   const text = response.content[0].text;
-  // Extract JSON safely: find first { and last }
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in roles/milestones response');
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found in roles/milestones response");
   const jsonStr = text.substring(firstBrace, lastBrace + 1);
   return JSON.parse(jsonStr);
 }
 
-/**
- * Sub-generator 4: Open Questions and Next Actions
- * Returns: { open_questions: [...], immediate_next_actions: [...] }
- */
 async function generateOpenQuestionsAndNextActions(ideaContent, feasibilityData) {
-  const risks = feasibilityData?.risks?.map(r => r.risk).slice(0, 3).join(', ') || 'standard project risks';
-  
+  const risks = feasibilityData?.risks?.map((r) => r.risk).slice(0, 3).join(", ") || "standard project risks";
+
   const prompt = `You are a project strategist. Based on this project and its risks, identify open questions and immediate next actions.
 
 IDEA: ${ideaContent}
@@ -179,27 +161,23 @@ Requirements:
 - Questions should address risks and unknowns`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: "claude-3-sonnet-20240229",
     max_tokens: 500,
     temperature: 0.2,
-    messages: [{ role: 'user', content: prompt }]
+    messages: [{ role: "user", content: prompt }],
   });
 
   const text = response.content[0].text;
-  // Extract JSON safely: find first { and last }
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in questions/actions response');
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found in questions/actions response");
   const jsonStr = text.substring(firstBrace, lastBrace + 1);
   return JSON.parse(jsonStr);
 }
 
-/**
- * Assemble and validate the final execution plan
- */
 function assemblePlan(projectId, phasesData, componentsData, rolesData, questionsData) {
   const plan = {
-    schema_version: 'v1',
+    schema_version: "v1",
     project_id: projectId,
     timeline_weeks: phasesData.timeline_weeks,
     phases: phasesData.phases,
@@ -207,118 +185,103 @@ function assemblePlan(projectId, phasesData, componentsData, rolesData, question
     roles: rolesData.roles,
     milestones: rolesData.milestones,
     open_questions: questionsData.open_questions,
-    immediate_next_actions: questionsData.immediate_next_actions
+    immediate_next_actions: questionsData.immediate_next_actions,
   };
 
-  // Validate minimum counts
   const errors = [];
-  if (!plan.phases || plan.phases.length < 4) errors.push('phases must have at least 4 items');
-  if (!plan.components || plan.components.length < 6) errors.push('components must have at least 6 items');
-  if (!plan.milestones || plan.milestones.length < 5) errors.push('milestones must have at least 5 items');
-  if (!plan.immediate_next_actions || plan.immediate_next_actions.length < 7) errors.push('immediate_next_actions must have at least 7 items');
+  if (!plan.phases || plan.phases.length < 4) errors.push("phases must have at least 4 items");
+  if (!plan.components || plan.components.length < 6) errors.push("components must have at least 6 items");
+  if (!plan.milestones || plan.milestones.length < 5) errors.push("milestones must have at least 5 items");
+  if (!plan.immediate_next_actions || plan.immediate_next_actions.length < 7) errors.push("immediate_next_actions must have at least 7 items");
 
   return { plan, errors };
 }
 
-/**
- * Main planning job with sub-generators
- */
-async function processPlanningJob(job) {
+export async function processPlanningJob(job) {
   const { projectId } = job.data;
   const startTime = Date.now();
-  
+
   try {
-    // Begin transaction
-    await query('BEGIN');
-    
-    // 1. Load idea content
-    const ideaResult = await query(
-      'SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
+    await pool.query("BEGIN");
+
+    const ideaResult = await pool.query(
+      "SELECT content FROM ideas WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
       [projectId]
     );
-    
-    const ideaContent = ideaResult.rows.length > 0 ? ideaResult.rows[0].content : 'Unknown project';
-    
-    // 2. Load feasibility artifact (if available)
-    const feasibilityResult = await query(
-      'SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1',
-      [projectId, 'feasibility_analysis_v1']
+
+    const ideaContent = ideaResult.rows.length > 0 ? ideaResult.rows[0].content : "Unknown project";
+
+    const feasibilityResult = await pool.query(
+      "SELECT content FROM artifacts WHERE project_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT 1",
+      [projectId, "feasibility_analysis_v1"]
     );
-    
+
     let feasibilityData = null;
     if (feasibilityResult.rows.length > 0) {
       try {
         feasibilityData = JSON.parse(feasibilityResult.rows[0].content);
       } catch (e) {
-        console.warn('[PlanningJob] Could not parse feasibility artifact');
+        console.warn("[PlanningJob] Could not parse feasibility artifact");
       }
     }
-    
-    // 3. Generate plan sub-components
+
     console.log(`[PlanningJob] Generating phases and timeline for project ${projectId}`);
     const phasesData = await generatePhasesAndTimeline(ideaContent, feasibilityData);
-    
+
     console.log(`[PlanningJob] Generating components`);
     const componentsData = await generateComponents(ideaContent, feasibilityData);
-    
+
     console.log(`[PlanningJob] Generating roles and milestones`);
     const rolesData = await generateRolesAndMilestones(ideaContent, phasesData);
-    
+
     console.log(`[PlanningJob] Generating open questions and next actions`);
     const questionsData = await generateOpenQuestionsAndNextActions(ideaContent, feasibilityData);
-    
-    // 4. Assemble and validate
+
     const { plan, errors } = assemblePlan(projectId, phasesData, componentsData, rolesData, questionsData);
-    
+
     let artifact = plan;
     if (errors.length > 0) {
       console.warn(`[PlanningJob] Validation errors:`, errors);
       artifact = generatePlanFallback(projectId, errors);
     }
-    
-    // 5. Persist artifact
+
     const artifactId = randomUUID();
-    await query(
-      'INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING',
-      [artifactId, projectId, 'planning', PLAN_TYPE, PLAN_TYPE, JSON.stringify(artifact)]
+    await pool.query(
+      "INSERT INTO artifacts (id, project_id, stage, type, name, content) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (project_id, stage, type) DO NOTHING",
+      [artifactId, projectId, "planning", PLAN_TYPE, PLAN_TYPE, JSON.stringify(artifact)]
     );
-    
+
     console.log(`[PlanningJob] Persisted artifact ${artifactId}`);
-    
-    // 6. Advance project stage
-    await query(
-      'UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2',
-      ['PlanningComplete', projectId]
-    );
-    
-    // Commit transaction
-    await query('COMMIT');
-    
+
+    await pool.query("UPDATE projects SET stage = $1, updated_at = NOW() WHERE id = $2", [
+      "PlanningComplete",
+      projectId,
+    ]);
+
+    await pool.query("COMMIT");
+
     const duration = Date.now() - startTime;
-    
+
     console.log(`[PlanningJob] Completed for project ${projectId}`);
     console.log(`[PlanningJob] Timeline: ${artifact.timeline_weeks} weeks, ${artifact.phases.length} phases`);
     console.log(`[PlanningJob] Duration: ${duration}ms`);
-    
+
     const result = {
       ok: true,
       projectId,
       timeline_weeks: artifact.timeline_weeks,
       phases: artifact.phases.length,
       validated: errors.length === 0,
-      tokens: { input: 0, output: 0 }, // Not tracked for sub-calls
+      tokens: { input: 0, output: 0 },
       cost: 0,
-      duration
+      duration,
     };
-    
+
     logPlanningRun(projectId, result);
     return result;
   } catch (error) {
-    // Rollback transaction
-    await query('ROLLBACK');
+    await pool.query("ROLLBACK");
     console.error(`[PlanningJob] Error for project ${projectId}:`, error.message);
     throw error;
   }
 }
-
-module.exports = { processPlanningJob };
