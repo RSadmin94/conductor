@@ -14,14 +14,20 @@ if (missingVars.length > 0) {
   process.exit(1);
 }
 
-// Create connection config from individual environment variables
+// Build connection string with proper SSL configuration
+// Render PostgreSQL requires SSL but has certificate issues, so we use rejectUnauthorized: false
+const connectionString = `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
+
 const connectionConfig = {
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  ssl: { rejectUnauthorized: false }, // Required for Render PostgreSQL
+  connectionString,
+  // SSL configuration for Render PostgreSQL
+  ssl: {
+    rejectUnauthorized: false,
+  },
+  // Connection pool settings
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
 };
 
 // Initialize database connection
@@ -53,9 +59,9 @@ async function testConnection() {
   try {
     const result = await pool.query('SELECT NOW()');
     console.log('✓ PostgreSQL database connection initialized');
-    console.log(`  Host: ${connectionConfig.host}`);
-    console.log(`  Database: ${connectionConfig.database}`);
-    console.log(`  User: ${connectionConfig.user}`);
+    console.log(`  Host: ${process.env.DB_HOST}`);
+    console.log(`  Database: ${process.env.DB_NAME}`);
+    console.log(`  User: ${process.env.DB_USER}`);
     
     // Initialize schema
     await initializeSchema();
