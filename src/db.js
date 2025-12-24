@@ -1,14 +1,12 @@
 import pg from "pg";
 const { Pool } = pg;
 
-const raw = process.env.DATABASE_URL;
-console.log("[DB] DATABASE_URL present?", !!raw);
-
-if (!raw) throw new Error("DATABASE_URL missing");
+const dbUrl = (process.env.DATABASE_URL || "").trim();
+if (!dbUrl) throw new Error("DATABASE_URL missing");
 
 export const pool = new Pool({
-  connectionString: raw.trim(),
-  ssl: { rejectUnauthorized: false },
+  connectionString: dbUrl,
+  ssl: true, // Railway/Supabase usually OK
   keepAlive: true,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,

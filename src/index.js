@@ -1,11 +1,22 @@
-const raw = process.env.DATABASE_URL || "";
-const redacted = raw.replace(/:\/\/([^:]+):([^@]+)@/, "://S1:***@");
-console.log("[BOOT] service=", process.env.RENDER_SERVICE_NAME || process.env.SERVICE_NAME || "unknown");
-console.log("[BOOT] DATABASE_URL present?", !!raw);
-console.log("[BOOT] DATABASE_URL host=", (() => {
-  try { return new URL(raw).host; } catch { return "INVALID_URL"; }
-})());
-console.log("[BOOT] DATABASE_URL redacted=", redacted);
+import fs from "fs";
+
+const envPath = "/etc/secrets/conductor.env";
+
+if (fs.existsSync(envPath)) {
+  const raw = fs.readFileSync(envPath, "utf8");
+  for (const line of raw.split("\n")) {
+    const s = line.trim();
+    if (!s || s.startsWith("#")) continue;
+    const i = s.indexOf("=");
+    if (i === -1) continue;
+    const k = s.slice(0, i).trim();
+    const v = s.slice(i + 1).trim();
+    if (!process.env[k]) process.env[k] = v; // do not override existing
+  }
+}
+
+const u = process.env.DATABASE_URL || "";
+console.log("[BOOT] DATABASE_URL present?", !!u);
 
 const express = require('express');
 const cors = require('cors');
