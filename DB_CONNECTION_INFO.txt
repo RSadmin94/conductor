@@ -1,0 +1,23 @@
+Render PostgreSQL Database Connection Details
+==============================================
+
+Service ID: dpg-d55lk16uk2gs73c0u9tg-a
+Database Name: conductor_db_1dlb
+
+Connection Details:
+- Hostname: dpg-d55l1k1uk2gs73c0u9tg-a
+- Port: 5432
+- Database: conductor_db_1dlb
+- Username: conductor_db_1dlb_user
+- Password: (see Render dashboard)
+
+External Database URL (from dashboard):
+postgresql://conductor_db_1dlb_user:RBqhVU1V9OMFctQfM7ypfT1UDy8y5pcdsqp-d551k1Guk2gs73c0u9tg-a.oregon-postgres.render.com/conductor_db_1dlb
+
+Note: The password contains special characters and needs to be URL-encoded when used in connection strings.
+The "-" character in the password is safe in URLs, but the "." character in the hostname may need special handling.
+
+Status: Available
+PostgreSQL Version: 18
+Region: Oregon (US West)
+Storage: 4.88% used out of 1 GB

@@ -1,0 +1,11 @@
+DATABASE_URL from Render Environment Variables
+==============================================
+
+The value shown in the Render dashboard (truncated):
+postgresql://conductor_db_1dlb_user:RBqhVU1V9OMFctQfM7ypfT1UDy8y5pcdsqp-d551k1Guk2gs73c0u9tg-a.oregon-postgres.render.com/conductor_db_1dlb
+
+This is the correct external database URL from the Render PostgreSQL database dashboard.
+
+The issue with the parsing error is that my manual parser in db.js is trying to split on "@" but the password contains special characters that might be interfering.
+
+The fix: Instead of manually parsing, use the URL directly with the pg library's built-in URL parser, or use individual connection parameters extracted from the URL.

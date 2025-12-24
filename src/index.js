@@ -1,3 +1,4 @@
+console.log("[BOOT]", process.env.SERVICE_NAME, "DB?", !!process.env.DATABASE_URL);
 const express = require('express');
 const cors = require('cors');
 const { startFeasibilityWorker } = require('./workers/feasibilityWorker');
@@ -59,4 +60,3 @@ async function start() {
 }
 
 start().catch(console.error);
-

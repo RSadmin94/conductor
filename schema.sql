@@ -7,7 +7,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Projects table
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    state TEXT NOT NULL DEFAULT 'Idea',
+    state TEXT NOT NULL DEFAULT 'Active',
+    stage TEXT NOT NULL DEFAULT 'Idea',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
