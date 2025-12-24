@@ -8,31 +8,24 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-// Parse DATABASE_URL manually to avoid pg-connection-string parsing issues
+// Parse DATABASE_URL using a more robust method
 // Format: postgresql://user:password@host:port/database
 const parseConnectionUrl = (url) => {
   try {
-    // Remove the protocol
-    const withoutProtocol = url.replace(/^postgresql:\/\//, '');
-    
-    // Split user:password from host:port/database
-    const [credentials, hostAndDb] = withoutProtocol.split('@');
-    const [user, password] = credentials.split(':');
-    
-    // Split host:port from database
-    const [hostPort, database] = hostAndDb.split('/');
-    const [host, port] = hostPort.split(':');
+    // Use URL constructor to parse the connection string
+    const urlObj = new URL(url);
     
     return {
-      host: host || 'localhost',
-      port: parseInt(port) || 5432,
-      database: database || 'postgres',
-      user: user || 'postgres',
-      password: password || '',
+      host: urlObj.hostname,
+      port: parseInt(urlObj.port) || 5432,
+      database: urlObj.pathname.slice(1), // Remove leading slash
+      user: urlObj.username,
+      password: urlObj.password,
     };
   } catch (err) {
     console.error('Failed to parse DATABASE_URL:', err.message);
     console.error('Expected format: postgresql://user:password@host:port/database');
+    console.error('Received:', process.env.DATABASE_URL.substring(0, 50) + '...');
     process.exit(1);
   }
 };
