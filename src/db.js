@@ -3,21 +3,27 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-// CRITICAL: DATABASE_URL is REQUIRED - app must crash on startup if missing
-if (!process.env.DATABASE_URL) {
-  console.error('FATAL: DATABASE_URL environment variable is missing');
+// CRITICAL: Database credentials are REQUIRED - app must crash on startup if missing
+const requiredVars = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
+const missingVars = requiredVars.filter(v => !process.env[v]);
+
+if (missingVars.length > 0) {
+  console.error('FATAL: Missing required database environment variables:', missingVars.join(', '));
   console.error('PostgreSQL persistence is required for production. Exiting.');
   process.exit(1);
 }
 
-// Create Pool using DATABASE_URL
-// For Render internal URLs (dpg-*.render.com without region suffix), SSL is not needed
-// For external URLs, SSL is required but handled by pg library defaults
+// Create Pool using individual environment variables
+// This is more reliable than DATABASE_URL for Render internal connections
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  // Only use SSL if connecting to external URL (contains .oregon-postgres.render.com)
-  // Internal URLs don't need SSL
-  ssl: process.env.DATABASE_URL.includes('.render.com') ? { rejectUnauthorized: false } : false,
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT, 10),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  // Use SSL only for external Render connections
+  // Internal connections (dpg-*.render.com without region) don't need SSL
+  ssl: process.env.DB_HOST.includes('.render.com') ? { rejectUnauthorized: false } : false,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
@@ -49,7 +55,7 @@ async function initializeSchema() {
 async function testConnection() {
   try {
     const r = await pool.query('SELECT 1 as ok');
-    console.log('✓ Using PostgreSQL database via DATABASE_URL');
+    console.log('✓ Using PostgreSQL database via DB_* environment variables');
     console.log('[pg] connectivity ok:', r.rows[0]);
     
     // Initialize schema
