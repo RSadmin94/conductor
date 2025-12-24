@@ -10,10 +10,14 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-// Create Pool using DATABASE_URL with proper SSL configuration for Render PostgreSQL
+// Create Pool using DATABASE_URL
+// For Render internal URLs (dpg-*.render.com without region suffix), SSL is not needed
+// For external URLs, SSL is required but handled by pg library defaults
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Render SSL handshake compatibility
+  // Only use SSL if connecting to external URL (contains .oregon-postgres.render.com)
+  // Internal URLs don't need SSL
+  ssl: process.env.DATABASE_URL.includes('.render.com') ? { rejectUnauthorized: false } : false,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
@@ -45,7 +49,7 @@ async function initializeSchema() {
 async function testConnection() {
   try {
     const r = await pool.query('SELECT 1 as ok');
-    console.log('✓ Using PostgreSQL database via DATABASE_URL (SSL enabled)');
+    console.log('✓ Using PostgreSQL database via DATABASE_URL');
     console.log('[pg] connectivity ok:', r.rows[0]);
     
     // Initialize schema
