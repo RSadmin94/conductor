@@ -107,8 +107,8 @@ Return the feasibility_analysis_v1 JSON object.`;
 
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 1500,
-      temperature: 0.3,
+      max_tokens: 1200,
+      temperature: 0.2,
       system: FEASIBILITY_SYSTEM_PROMPT,
       messages: [
         {
