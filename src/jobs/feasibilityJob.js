@@ -4,7 +4,18 @@ const { FEASIBILITY_TYPE, validateFeasibility, generateFeasibilityFallback } = r
 const { logFeasibilityRun } = require('../utils/runLogger');
 const Anthropic = require('@anthropic-ai/sdk');
 
-const client = new Anthropic();
+/**
+ * Lazy initialization of Anthropic client
+ * Ensures API key is available at runtime, not at module load time
+ */
+function getAnthropicClient() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY missing in worker environment');
+  }
+  return new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+  });
+}
 
 /**
  * System prompt for Claude 3.5 Sonnet - Feasibility Analysis
@@ -80,7 +91,9 @@ Return ONLY valid JSON matching this exact structure:
  */
 async function generateFeasibilityWithClaude(projectId, ideaId, ideaContent) {
   try {
-    console.log(`[FeasibilityJob] Calling Claude 3.5 Sonnet for project ${projectId}`);
+    console.log(`[FeasibilityJob] Claude call start`);
+    
+    const client = getAnthropicClient();
     
     const userPrompt = `Analyze this project idea and return ONLY valid JSON:
 
@@ -119,12 +132,14 @@ Return the feasibility_analysis_v1 JSON object.`;
     let artifact;
     try {
       artifact = JSON.parse(responseText);
+      console.log(`[FeasibilityJob] JSON parsed`);
     } catch (parseError) {
       console.warn(`[FeasibilityJob] JSON parse error, attempting repair`);
       // Try to extract JSON from response
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         artifact = JSON.parse(jsonMatch[0]);
+        console.log(`[FeasibilityJob] JSON parsed (repaired)`);
       } else {
         throw new Error('Could not extract valid JSON from Claude response');
       }
@@ -214,6 +229,7 @@ async function processFeasibilityJob(job) {
       'UPDATE projects SET stage = $1, state = $2, updated_at = NOW() WHERE id = $3',
       ['FeasibilityComplete', 'Active', projectId]
     );
+    console.log(`[FeasibilityJob] Stage updated → FeasibilityComplete`);
     
     // Commit transaction
     await query('COMMIT');
@@ -244,9 +260,10 @@ async function processFeasibilityJob(job) {
     } catch (rollbackErr) {
       console.error('[FeasibilityJob] Rollback failed:', rollbackErr.message);
     }
-    console.error('[FeasibilityJob] ERROR', {
+    console.error('[FeasibilityJob] FAILED', {
       projectId,
-      message: error?.message
+      message: error?.message,
+      stack: error?.stack
     });
     throw error;
   }
