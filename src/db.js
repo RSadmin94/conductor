@@ -8,9 +8,41 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-// Initialize database connection with DATABASE_URL
+// Parse DATABASE_URL manually to avoid pg-connection-string parsing issues
+// Format: postgresql://user:password@host:port/database
+const parseConnectionUrl = (url) => {
+  try {
+    // Remove the protocol
+    const withoutProtocol = url.replace(/^postgresql:\/\//, '');
+    
+    // Split user:password from host:port/database
+    const [credentials, hostAndDb] = withoutProtocol.split('@');
+    const [user, password] = credentials.split(':');
+    
+    // Split host:port from database
+    const [hostPort, database] = hostAndDb.split('/');
+    const [host, port] = hostPort.split(':');
+    
+    return {
+      host: host || 'localhost',
+      port: parseInt(port) || 5432,
+      database: database || 'postgres',
+      user: user || 'postgres',
+      password: password || '',
+    };
+  } catch (err) {
+    console.error('Failed to parse DATABASE_URL:', err.message);
+    console.error('Expected format: postgresql://user:password@host:port/database');
+    process.exit(1);
+  }
+};
+
+const connectionConfig = parseConnectionUrl(process.env.DATABASE_URL);
+
+// Initialize database connection with parsed parameters
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  ...connectionConfig,
+  ssl: { rejectUnauthorized: false }, // Required for Render PostgreSQL
 });
 
 pool.on('error', (err) => {
