@@ -16,4 +16,4 @@ export const pool = new Pool({
 });
 
 await pool.query("SELECT 1");
-console.log("✓ Postgres OK");	Postgres OK");
+console.log("✓ Postgres OK");

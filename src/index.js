@@ -1,4 +1,12 @@
-console.log("[BOOT]", process.env.SERVICE_NAME, "DB?", !!process.env.DATABASE_URL);
+const raw = process.env.DATABASE_URL || "";
+const redacted = raw.replace(/:\/\/([^:]+):([^@]+)@/, "://S1:***@");
+console.log("[BOOT] service=", process.env.RENDER_SERVICE_NAME || process.env.SERVICE_NAME || "unknown");
+console.log("[BOOT] DATABASE_URL present?", !!raw);
+console.log("[BOOT] DATABASE_URL host=", (() => {
+  try { return new URL(raw).host; } catch { return "INVALID_URL"; }
+})());
+console.log("[BOOT] DATABASE_URL redacted=", redacted);
+
 const express = require('express');
 const cors = require('cors');
 const { startFeasibilityWorker } = require('./workers/feasibilityWorker');
