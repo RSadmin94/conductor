@@ -148,6 +148,17 @@ async function processFeasibilityJob(job) {
   const { projectId } = job.data;
   const startTime = Date.now();
   
+  // Startup checks
+  console.log('[FeasibilityJob] START', {
+    projectId,
+    hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
+    model: process.env.CLAUDE_MODEL || 'unset'
+  });
+  
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is missing in worker environment');
+  }
+  
   try {
     // Begin transaction
     await query('BEGIN');
@@ -228,9 +239,15 @@ async function processFeasibilityJob(job) {
     logFeasibilityRun(projectId, result);
     return result;
   } catch (error) {
-    // Rollback transaction
-    await query('ROLLBACK');
-    console.error(`[FeasibilityJob] Error for project ${projectId}:`, error.message);
+    try {
+      await query('ROLLBACK');
+    } catch (rollbackErr) {
+      console.error('[FeasibilityJob] Rollback failed:', rollbackErr.message);
+    }
+    console.error('[FeasibilityJob] ERROR', {
+      projectId,
+      message: error?.message
+    });
     throw error;
   }
 }
