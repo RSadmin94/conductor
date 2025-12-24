@@ -1,4 +1,20 @@
+'''
 import fs from "fs";
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+
+import { startFeasibilityWorker } from "./workers/feasibilityWorker.js";
+import { startPlanningWorker } from "./workers/planningWorker.js";
+import { startExecutionWorker } from "./workers/executionWorker.js";
+
+import { createIdea } from "./handlers/ideas.js";
+import { triggerFeasibility } from "./handlers/feasibility.js";
+import { triggerPlanning } from "./handlers/planning.js";
+import { startExecution } from "./handlers/execution.js";
+import { listArtifacts } from "./handlers/artifacts.js";
+import { getProject } from "./handlers/projects.js";
+import { getReport } from "./handlers/report.js";
 
 const envPath = "/etc/secrets/conductor.env";
 
@@ -15,45 +31,28 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const u = process.env.DATABASE_URL || "";
-console.log("[BOOT] DATABASE_URL present?", !!u);
-
-const express = require('express');
-const cors = require('cors');
-const { startFeasibilityWorker } = require('./workers/feasibilityWorker');
-const { startPlanningWorker } = require('./workers/planningWorker');
-const { startExecutionWorker } = require('./workers/executionWorker');
-require('dotenv').config();
+dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static("public"));
 
 // API Routes
-const ideasHandler = require('./handlers/ideas');
-const feasibilityHandler = require('./handlers/feasibility');
-const planningHandler = require('./handlers/planning');
-const executionHandler = require('./handlers/execution');
-const artifactsHandler = require('./handlers/artifacts');
-const projectsHandler = require('./handlers/projects');
-const reportHandler = require('./handlers/report');
-
-// Landing page route (before API routes)
-app.get('/', (req, res) => {
-  res.sendFile('landing.html', { root: 'public' });
+app.get("/", (req, res) => {
+  res.sendFile("landing.html", { root: "public" });
 });
 
-app.post('/api/ideas', ideasHandler.createIdea);
-app.post('/api/projects/:projectId/feasibility', feasibilityHandler.triggerFeasibility);
-app.post('/api/projects/:projectId/planning', planningHandler.triggerPlanning);
-app.post('/api/projects/:projectId/execution/start', executionHandler.startExecution);
-app.get('/api/projects/:projectId/artifacts', artifactsHandler.listArtifacts);
-app.get('/api/projects/:projectId', projectsHandler.getProject);
-app.get('/api/projects/:projectId/report', reportHandler.getReport);
+app.post("/api/ideas", createIdea);
+app.post("/api/projects/:projectId/feasibility", triggerFeasibility);
+app.post("/api/projects/:projectId/planning", triggerPlanning);
+app.post("/api/projects/:projectId/execution/start", startExecution);
+app.get("/api/projects/:projectId/artifacts", listArtifacts);
+app.get("/api/projects/:projectId", getProject);
+app.get("/api/projects/:projectId/report", getReport);
 
 // Health endpoint
-app.get('/health', (req, res) => {
+app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
@@ -64,18 +63,11 @@ async function start() {
   await startFeasibilityWorker();
   await startPlanningWorker();
   await startExecutionWorker();
-  
+
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`API endpoints:`);
-    console.log(`  POST /api/ideas`);
-    console.log(`  POST /api/projects/:projectId/feasibility`);
-    console.log(`  POST /api/projects/:projectId/planning`);
-    console.log(`  POST /api/projects/:projectId/execution/start`);
-    console.log(`  GET /api/projects/:projectId/artifacts`);
-    console.log(`  GET /api/projects/:projectId`);
-    console.log(`  GET /api/projects/:projectId/report`);
   });
 }
 
 start().catch(console.error);
+'''
