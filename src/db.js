@@ -8,12 +8,13 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-// Parse DATABASE_URL using regex to handle special characters in password
+// Parse DATABASE_URL using regex with non-greedy matching
 // Format: postgresql://user:password@host:port/database
 const parseConnectionUrl = (url) => {
   try {
     // Match: postgresql://username:password@host:port/database
-    const match = url.match(/^postgresql:\/\/([^:]+):(.+)@([^:]+):(\d+)\/(.+)$/);
+    // Use non-greedy match for password to stop at the last @ before :port/
+    const match = url.match(/^postgresql:\/\/([^:]+):(.+?)@([^:]+):(\d+)\/(.+)$/);
     
     if (!match) {
       throw new Error('URL does not match expected format');
